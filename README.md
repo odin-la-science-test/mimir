@@ -15,9 +15,10 @@ mimir explique-moi la différence entre une PCR et une qPCR
 3. Active **MESSAGE CONTENT INTENT** (obligatoire, en bas de l'onglet Bot)
 4. Onglet **OAuth2 > URL Generator** :
    - Scopes : `bot`
-   - Permissions : `Send Messages`, `Read Message History`, `View Channels`,
-     `Ban Members`, `Kick Members`, `Moderate Members` (pour la modération,
-     voir plus bas)
+   - Permissions :
+     - **Texte** : `Send Messages`, `Read Message History`, `View Channels`, `Attach Files`, `Use External Emojis`
+     - **Modération** : `Ban Members`, `Kick Members`, `Moderate Members`
+     - **Vocal** : `Connect`, `Speak`, `Use Voice Activity`
 5. Ouvre l'URL générée pour inviter le bot sur ton serveur
 
 ## 2. Obtenir une clé Gemini gratuite
@@ -194,15 +195,70 @@ en permanence, options gratuites/pas chères :
 - Un petit VPS (quelques euros/mois) + `pm2` pour garder le process actif
 - Une Raspberry Pi ou un vieux PC à la maison
 
-## Prochaines étapes (pas encore construites)
+## Module vocal complet
 
-- **Vocal** (écouter + répondre en voix dans un salon vocal) : nécessite
-  des dépendances audio (`@discordjs/voice`, ffmpeg) plus lourdes à
-  installer sur Windows. À faire dans un chantier séparé — le bot annoncera
-  automatiquement qu'il enregistre dès qu'il rejoint un salon vocal.
-- **Coding agent niveau Sonnet 4.5** : un modèle gratuit n'atteint pas ce
-  niveau. Pour du vrai code de qualité, utilise **Claude Code** directement
-  (terminal, VS Code, ou l'app desktop) plutôt que de faire coder ce bot.
+Le bot peut rejoindre un salon vocal, écouter les conversations, les transcrire et y répondre à voix haute ! 
+
+### Configuration requise
+
+Pour utiliser le module vocal, ajoute une clé API Groq (gratuite) dans ton `.env` :
+
+```bash
+GROQ_API_KEY=ta_cle_groq_ici
+```
+
+**Obtenir une clé Groq gratuite :**
+1. Va sur https://console.groq.com
+2. Crée un compte (gratuit, sans carte bancaire)
+3. Génère une clé API
+
+### Commandes vocales
+
+```
+mimir rejoins le vocal        # Le bot rejoint ton salon vocal
+mimir quitte le vocal         # Le bot quitte le salon vocal
+stop mimir                    # À dire à l'oral pour faire partir le bot
+```
+
+### Fonctionnalités vocales
+
+**1. Écoute et transcription**
+- Le bot écoute tout ce qui se dit dans le salon vocal
+- Transcription automatique via Groq Whisper (gratuit, très précis)
+- Affiche les transcriptions dans le salon texte
+
+**2. Commandes vocales**
+- Dis "mimir" suivi de ta question à l'oral (comme dans le chat)
+- Exemple : *"mimir explique-moi la photosynthèse"*
+- Le bot transcrit, génère une réponse courte adaptée à l'oral, et la lit à voix haute
+
+**3. Synthèse vocale (TTS)**
+- Utilise Microsoft Edge TTS (gratuit, sans clé API)
+- Voix française par défaut : `fr-FR-HenriNeural`
+- Personnalisable dans `.env` avec `TTS_VOICE` (autres voix : `fr-FR-DeniseNeural`, `fr-CA-JeanNeural`, etc.)
+
+**4. Messages vocaux Discord natifs**
+- Envoie un message vocal Discord → Mimir répond aussi en message vocal
+- Utilise la commande : `mimir message vocal ta question ici`
+- Le bot génère une vraie note vocale Discord (avec forme d'onde et durée)
+
+**5. Lecture automatique des réponses texte**
+- Une fois en vocal, **toutes** les réponses texte sont aussi lues à voix haute
+- Même si tu poses une question dans le chat, le bot la lit en vocal
+- Le markdown est nettoyé automatiquement avant lecture
+
+### Transparence et éthique
+
+⚠️ **Important** : Le bot annonce clairement dans le salon texte qu'il enregistre et transcrit la conversation dès qu'il rejoint le vocal. Tous les participants sont informés.
+
+### Dépendances audio
+
+Les dépendances nécessaires sont déjà installées :
+- `@discordjs/voice` : connexion vocale Discord
+- `ffmpeg-static` : traitement audio
+- `opusscript` : décodage Opus
+- `prism-media` : pipeline audio
+- `msedge-tts` : synthèse vocale Microsoft Edge
 
 ## Personnalisation
 
