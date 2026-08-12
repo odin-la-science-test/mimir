@@ -1897,16 +1897,15 @@ async function synthesizeSpeechBuffer(text, voiceName, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const tts = new MsEdgeTTS();
     let streamClosed = false;
+    const chunks = []; // Déplacer ici pour être accessible dans le catch
+    let chunkCount = 0;
+    let hasReceivedData = false;
     
     try {
       console.log(`🔄 Tentative TTS ${attempt}/${maxRetries} pour "${text.slice(0, 50)}..."`);
       
       await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
       const { audioStream } = tts.toStream(text);
-
-      const chunks = [];
-      let chunkCount = 0;
-      let hasReceivedData = false;
       
       // Timeout de 45 secondes pour la synthèse (augmenté)
       const timeout = new Promise((_, reject) => 
