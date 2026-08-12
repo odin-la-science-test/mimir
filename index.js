@@ -1896,6 +1896,7 @@ async function synthesizeSpeechBuffer(text, voiceName, maxRetries = 3) {
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const tts = new MsEdgeTTS();
+    let streamClosed = false;
     
     try {
       console.log(`🔄 Tentative TTS ${attempt}/${maxRetries} pour "${text.slice(0, 50)}..."`);
@@ -1905,25 +1906,60 @@ async function synthesizeSpeechBuffer(text, voiceName, maxRetries = 3) {
 
       const chunks = [];
       let chunkCount = 0;
+      let hasReceivedData = false;
       
-      // Timeout de 30 secondes pour la synthèse
+      // Timeout de 45 secondes pour la synthèse (augmenté)
       const timeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('TTS timeout après 30 secondes')), 30000)
+        setTimeout(() => reject(new Error('TTS timeout après 45 secondes')), 45000)
       );
       
-      const streamPromise = (async () => {
-        for await (const chunk of audioStream) {
+      const streamPromise = new Promise((resolve, reject) => {
+        audioStream.on('data', (chunk) => {
           chunks.push(chunk);
           chunkCount++;
-        }
-      })();
+          hasReceivedData = true;
+        });
+        
+        audioStream.on('end', () => {
+          resolve();
+        });
+        
+        audioStream.on('error', (err) => {
+          streamClosed = true;
+          reject(err);
+        });
+        
+        audioStream.on('close', () => {
+          streamClosed = true;
+          // Si on a reçu des données, considérer comme succès
+          if (hasReceivedData && chunks.length > 0) {
+            resolve();
+          } else {
+            reject(new Error('Stream fermé sans données'));
+          }
+        });
+      });
       
       await Promise.race([streamPromise, timeout]);
       
+      // Attendre un peu pour s'assurer que tout est bien reçu
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       const buffer = Buffer.concat(chunks);
+      
+      // Vérifier que le buffer n'est pas vide
+      if (buffer.length === 0) {
+        throw new Error('Buffer audio vide');
+      }
+      
       console.log(`✅ TTS réussi: ${buffer.length} octets (${chunkCount} chunks)`);
       
-      tts.close();
+      try {
+        tts.close();
+      } catch (e) {
+        // Ignore
+      }
+      
       return buffer;
       
     } catch (error) {
@@ -1936,9 +1972,18 @@ async function synthesizeSpeechBuffer(text, voiceName, maxRetries = 3) {
         // Ignore les erreurs de fermeture
       }
       
-      // Attente exponentielle avant retry (1s, 2s, 4s...)
+      // Si on a des données partielles et que c'est juste une fermeture prématurée, on peut les utiliser
+      if (streamClosed && chunks && chunks.length > 0) {
+        const partialBuffer = Buffer.concat(chunks);
+        if (partialBuffer.length > 1000) { // Au moins 1KB de données
+          console.log(`⚠️ Utilisation des données partielles (${partialBuffer.length} octets)`);
+          return partialBuffer;
+        }
+      }
+      
+      // Attente exponentielle avant retry (2s, 4s, 8s...)
       if (attempt < maxRetries) {
-        const waitTime = Math.pow(2, attempt - 1) * 1000;
+        const waitTime = Math.pow(2, attempt) * 1000;
         console.log(`⏳ Attente de ${waitTime}ms avant nouvelle tentative...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
