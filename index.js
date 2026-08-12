@@ -1366,7 +1366,7 @@ async function sendNativeVoiceMessage(channelId, replyToMessageId, oggBuffer, du
       files: [{
         filename: filename,
         file_size: fileSize,
-        id: "0"
+        id: "2"
       }]
     }),
   });
@@ -1380,7 +1380,7 @@ async function sendNativeVoiceMessage(channelId, replyToMessageId, oggBuffer, du
   const uploadUrl = attachmentData.attachments[0].upload_url;
   const uploadedFilename = attachmentData.attachments[0].upload_filename;
 
-  // Étape 2 : Upload le fichier OGG
+  // Étape 2 : Upload le fichier OGG (sans Authorization header)
   const uploadResponse = await fetch(uploadUrl, {
     method: "PUT",
     headers: {
@@ -1394,9 +1394,9 @@ async function sendNativeVoiceMessage(channelId, replyToMessageId, oggBuffer, du
     throw new Error(`Discord file upload error: ${uploadResponse.status} - ${errorText}`);
   }
 
-  // Étape 3 : Envoyer le message vocal
+  // Étape 3 : Envoyer le message vocal avec flags: 8192 (IS_VOICE_MESSAGE)
   const messagePayload = {
-    flags: MessageFlags.IsVoiceMessage,
+    flags: 8192,
     attachments: [{
       id: "0",
       filename: filename,
@@ -1428,8 +1428,86 @@ async function sendNativeVoiceMessage(channelId, replyToMessageId, oggBuffer, du
   }
 
   return await messageResponse.json();
+}
 
-  return await response.json();
+/**
+ * Gère un message vocal Discord envoyé dans le chat (la bulle audio).
+ * Télécharge l'audio, le transcrit avec Groq Whisper, puis répond
+ * automatiquement (en texte ou en vocal selon le contexte).
+ */
+async function handleVoiceMessage(message, voiceAttachment) {
+  console.log(`🎤 Message vocal reçu de ${message.author.tag}: ${voiceAttachment.url}`);
+
+  if (!GROQ_API_KEY) {
+    await message.reply(
+      "⚠️ Je ne peux pas transcrire les messages vocaux sans `GROQ_API_KEY`. " +
+        "Ajoute une clé gratuite depuis https://console.groq.com"
+    );
+    return;
+  }
+
+  await message.channel.sendTyping();
+
+  try {
+    // Télécharger le fichier audio
+    const response = await fetch(voiceAttachment.url);
+    if (!response.ok) {
+      throw new Error(`Téléchargement échoué: ${response.status}`);
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+    console.log(`📥 Audio téléchargé: ${audioBuffer.byteLength} bytes`);
+
+    // Transcrire avec Groq Whisper
+    const formData = new FormData();
+    formData.append("file", new Blob([audioBuffer], { type: "audio/ogg" }), "voice.ogg");
+    formData.append("model", "whisper-large-v3");
+    formData.append("language", "fr");
+    formData.append("response_format", "json");
+
+    const transcriptionResponse = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: formData,
+    });
+
+    if (!transcriptionResponse.ok) {
+      const errorText = await transcriptionResponse.text();
+      throw new Error(`Groq Whisper error ${transcriptionResponse.status}: ${errorText}`);
+    }
+
+    const transcription = await transcriptionResponse.json();
+    const transcribedText = transcription.text?.trim();
+
+    if (!transcribedText) {
+      await message.reply("⚠️ Je n'ai pas réussi à comprendre ton message vocal (transcription vide).");
+      return;
+    }
+
+    console.log(`📝 Transcription: "${transcribedText}"`);
+
+    // Envoyer la transcription
+    await message.reply(`🎤 **Message vocal transcrit :**\n> ${transcribedText}\n\n💭 *Je prépare ma réponse...*`);
+
+    // Générer une réponse IA
+    const answerText = await callAIGenerateContent([
+      { role: "user", content: transcribedText }
+    ]);
+
+    // Répondre en texte
+    await sendLongReply(message, answerText.text);
+
+    // Si le bot est dans un salon vocal, lire la réponse à voix haute
+    await maybeSpeakReply(message.guild.id, answerText.text);
+
+  } catch (err) {
+    console.error("Erreur traitement message vocal:", err);
+    await message.reply(
+      `⚠️ Je n'ai pas réussi à traiter ton message vocal : ${err.message}`
+    );
+  }
 }
 
 /**
@@ -1542,18 +1620,31 @@ async function joinVoiceAndListen(message) {
       'Dites **"stop mimir"** ou tapez `mimir quitte le vocal` pour que je parte à tout moment.'
   );
 
+  console.log(`🔌 Tentative de connexion au vocal #${voiceChannel.name} (${voiceChannel.id})`);
+  
   const connection = joinVoiceChannel({
     channelId: voiceChannel.id,
     guildId: voiceChannel.guild.id,
     adapterCreator: voiceChannel.guild.voiceAdapterCreator,
     selfDeaf: false,
+    debug: true,
   });
 
+  console.log(`⏳ Attente de l'état Ready (timeout: 60s)...`);
+
   try {
-    await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+    await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
+    console.log(`✅ Connexion vocale établie !`);
   } catch (err) {
+    console.error(`❌ Timeout de connexion vocale:`, err);
+    console.error(`État actuel:`, connection.state.status);
     connection.destroy();
-    await message.reply("⚠️ Impossible de rejoindre le vocal (timeout de connexion).");
+    await message.reply(
+      `⚠️ Impossible de rejoindre le vocal (timeout après 60s). ` +
+      `État: ${connection.state.status}. ` +
+      `**Note**: Fly.io ne supporte pas bien les connexions vocales Discord. ` +
+      `Voir \`PROBLEME_VOCAL_FLYIO.md\` pour les solutions.`
+    );
     return;
   }
 
@@ -1825,7 +1916,11 @@ async function speakInVoiceChannel(connection, text) {
   }
 
   const player = createAudioPlayer();
-  const resource = createAudioResource(Readable.from(mp3Buffer), {
+  
+  // Créer un stream lisible à partir du buffer
+  const audioStream = Readable.from(mp3Buffer);
+  
+  const resource = createAudioResource(audioStream, {
     inputType: StreamType.Arbitrary,
   });
 
