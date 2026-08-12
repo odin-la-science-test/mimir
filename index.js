@@ -1891,21 +1891,62 @@ async function transcribeAudio(audioBuffer, filename = "audio.wav", contentType 
  * connexion persistante, mais beaucoup plus robuste (pas de connexion qui
  * traîne et devient invalide entre deux réponses).
  */
-async function synthesizeSpeechBuffer(text, voiceName) {
-  const tts = new MsEdgeTTS();
-  await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-  const { audioStream } = tts.toStream(text);
+async function synthesizeSpeechBuffer(text, voiceName, maxRetries = 3) {
+  let lastError = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const tts = new MsEdgeTTS();
+    
+    try {
+      console.log(`🔄 Tentative TTS ${attempt}/${maxRetries} pour "${text.slice(0, 50)}..."`);
+      
+      await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+      const { audioStream } = tts.toStream(text);
 
-  const chunks = [];
-  try {
-    for await (const chunk of audioStream) {
-      chunks.push(chunk);
+      const chunks = [];
+      let chunkCount = 0;
+      
+      // Timeout de 30 secondes pour la synthèse
+      const timeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('TTS timeout après 30 secondes')), 30000)
+      );
+      
+      const streamPromise = (async () => {
+        for await (const chunk of audioStream) {
+          chunks.push(chunk);
+          chunkCount++;
+        }
+      })();
+      
+      await Promise.race([streamPromise, timeout]);
+      
+      const buffer = Buffer.concat(chunks);
+      console.log(`✅ TTS réussi: ${buffer.length} octets (${chunkCount} chunks)`);
+      
+      tts.close();
+      return buffer;
+      
+    } catch (error) {
+      lastError = error;
+      console.error(`❌ Tentative TTS ${attempt}/${maxRetries} échouée:`, error.message);
+      
+      try {
+        tts.close();
+      } catch (closeError) {
+        // Ignore les erreurs de fermeture
+      }
+      
+      // Attente exponentielle avant retry (1s, 2s, 4s...)
+      if (attempt < maxRetries) {
+        const waitTime = Math.pow(2, attempt - 1) * 1000;
+        console.log(`⏳ Attente de ${waitTime}ms avant nouvelle tentative...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
     }
-  } finally {
-    tts.close();
   }
-
-  return Buffer.concat(chunks);
+  
+  // Si toutes les tentatives ont échoué
+  throw new Error(`TTS a échoué après ${maxRetries} tentatives: ${lastError?.message || 'Erreur inconnue'}`);
 }
 
 /**
