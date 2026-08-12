@@ -41,34 +41,163 @@ if (typeof global.crypto === "undefined") {
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 
-// Système de rotation d'API keys Gemini pour cumuler les quotas gratuits
+// ============================================================
+// SYSTÈME DE ROTATION INTELLIGENTE MULTI-PROVIDERS
+// ============================================================
+// Configuration des providers IA avec rotation automatique
+// Gemini (3 clés) → Groq → Mistral (2 clés)
+
 const GEMINI_API_KEYS = process.env.GEMINI_API_KEY
   ? process.env.GEMINI_API_KEY.split(",").map(k => k.trim()).filter(k => k.length > 0)
   : [];
-let currentKeyIndex = 0;
 
-// Fonction pour obtenir la clé API Gemini actuelle avec rotation automatique
-function getGeminiApiKey() {
-  if (GEMINI_API_KEYS.length === 0) {
-    return null;
-  }
-  return GEMINI_API_KEYS[currentKeyIndex];
-}
+const MISTRAL_API_KEYS = process.env.MISTRAL_API_KEY
+  ? process.env.MISTRAL_API_KEY.split(",").map(k => k.trim()).filter(k => k.length > 0)
+  : [];
 
-// Fonction pour passer à la clé suivante en cas d'erreur de quota
-function rotateGeminiApiKey() {
-  if (GEMINI_API_KEYS.length <= 1) {
-    console.warn("⚠️ Une seule clé API Gemini configurée, impossible de faire une rotation");
-    return false;
-  }
-  const oldIndex = currentKeyIndex;
-  currentKeyIndex = (currentKeyIndex + 1) % GEMINI_API_KEYS.length;
-  console.log(`🔄 Rotation API Gemini : clé ${oldIndex + 1} → clé ${currentKeyIndex + 1} (sur ${GEMINI_API_KEYS.length})`);
-  return true;
-}
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
+// État de rotation des providers
+let currentProvider = "gemini"; // "gemini" | "groq" | "mistral"
+let currentGeminiIndex = 0;
+let currentMistralIndex = 0;
+
+// Modèles à utiliser
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-const GROQ_API_KEY = process.env.GROQ_API_KEY; // pour la transcription vocale (Whisper)
+const GROQ_MODEL = "llama-3.3-70b-versatile"; // Excellent modèle, rapide et performant
+const MISTRAL_MODEL = "mistral-small-latest"; // Bon compromis qualité/vitesse
+
+/**
+ * Obtient la configuration du provider actuel
+ */
+function getCurrentProviderConfig() {
+  switch (currentProvider) {
+    case "gemini":
+      if (GEMINI_API_KEYS.length === 0) return null;
+      return {
+        provider: "gemini",
+        apiKey: GEMINI_API_KEYS[currentGeminiIndex],
+        model: GEMINI_MODEL,
+        index: currentGeminiIndex,
+        total: GEMINI_API_KEYS.length
+      };
+    case "groq":
+      if (!GROQ_API_KEY) return null;
+      return {
+        provider: "groq",
+        apiKey: GROQ_API_KEY,
+        model: GROQ_MODEL,
+        index: 0,
+        total: 1
+      };
+    case "mistral":
+      if (MISTRAL_API_KEYS.length === 0) return null;
+      return {
+        provider: "mistral",
+        apiKey: MISTRAL_API_KEYS[currentMistralIndex],
+        model: MISTRAL_MODEL,
+        index: currentMistralIndex,
+        total: MISTRAL_API_KEYS.length
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Passe au provider suivant en cas de quota dépassé
+ * Ordre : Gemini (rotation de clés) → Groq → Mistral (rotation de clés) → Gemini...
+ */
+function switchToNextProvider() {
+  const startProvider = currentProvider;
+  let attempts = 0;
+  const maxAttempts = 10; // Évite les boucles infinies
+
+  while (attempts < maxAttempts) {
+    attempts++;
+
+    if (currentProvider === "gemini") {
+      // Essayer la clé Gemini suivante
+      if (GEMINI_API_KEYS.length > 1 && currentGeminiIndex < GEMINI_API_KEYS.length - 1) {
+        currentGeminiIndex++;
+        console.log(`🔄 Gemini : passage à la clé ${currentGeminiIndex + 1}/${GEMINI_API_KEYS.length}`);
+        return true;
+      }
+      // Toutes les clés Gemini épuisées, passer à Groq
+      if (GROQ_API_KEY) {
+        currentProvider = "groq";
+        console.log(`🔄 Basculement : Gemini → Groq`);
+        return true;
+      }
+      // Pas de Groq, passer à Mistral
+      if (MISTRAL_API_KEYS.length > 0) {
+        currentProvider = "mistral";
+        currentMistralIndex = 0;
+        console.log(`🔄 Basculement : Gemini → Mistral`);
+        return true;
+      }
+      // Aucun fallback disponible
+      return false;
+    }
+
+    if (currentProvider === "groq") {
+      // Groq épuisé, passer à Mistral
+      if (MISTRAL_API_KEYS.length > 0) {
+        currentProvider = "mistral";
+        currentMistralIndex = 0;
+        console.log(`🔄 Basculement : Groq → Mistral`);
+        return true;
+      }
+      // Pas de Mistral, retour à Gemini
+      if (GEMINI_API_KEYS.length > 0) {
+        currentProvider = "gemini";
+        currentGeminiIndex = 0;
+        console.log(`🔄 Basculement : Groq → Gemini (nouveau cycle)`);
+        return true;
+      }
+      return false;
+    }
+
+    if (currentProvider === "mistral") {
+      // Essayer la clé Mistral suivante
+      if (MISTRAL_API_KEYS.length > 1 && currentMistralIndex < MISTRAL_API_KEYS.length - 1) {
+        currentMistralIndex++;
+        console.log(`🔄 Mistral : passage à la clé ${currentMistralIndex + 1}/${MISTRAL_API_KEYS.length}`);
+        return true;
+      }
+      // Toutes les clés Mistral épuisées, retour à Gemini
+      if (GEMINI_API_KEYS.length > 0) {
+        currentProvider = "gemini";
+        currentGeminiIndex = 0;
+        console.log(`🔄 Basculement : Mistral → Gemini (nouveau cycle)`);
+        return true;
+      }
+      // Pas de Gemini, essayer Groq
+      if (GROQ_API_KEY) {
+        currentProvider = "groq";
+        console.log(`🔄 Basculement : Mistral → Groq`);
+        return true;
+      }
+      return false;
+    }
+
+    // Provider inconnu, réinitialiser
+    if (GEMINI_API_KEYS.length > 0) {
+      currentProvider = "gemini";
+      currentGeminiIndex = 0;
+    } else if (GROQ_API_KEY) {
+      currentProvider = "groq";
+    } else if (MISTRAL_API_KEYS.length > 0) {
+      currentProvider = "mistral";
+      currentMistralIndex = 0;
+    } else {
+      return false;
+    }
+  }
+
+  console.error("⚠️ Rotation bloquée après trop de tentatives");
+  return false;
+}
 // Voix française pour la synthèse vocale (Microsoft Edge TTS, gratuit, sans clé).
 // Autres voix FR possibles : fr-FR-DeniseNeural, fr-FR-VivienneMultilingualNeural,
 // fr-CA-JeanNeural... Liste complète : https://github.com/Migushthe2nd/MsEdgeTTS
@@ -207,14 +336,29 @@ const MIN_AUDIO_BYTES = VOICE_SAMPLE_RATE * VOICE_CHANNELS * 2 * 0.3; // ignore 
 // Connexions vocales actives par serveur (guildId -> { connection, textChannel })
 const activeVoiceSessions = new Map();
 
-if (!DISCORD_TOKEN || GEMINI_API_KEYS.length === 0) {
-  console.error(
-    "❌ Il manque DISCORD_TOKEN ou GEMINI_API_KEY dans le fichier .env"
-  );
-  console.log("💡 Pour cumuler plusieurs quotas Gemini gratuits, sépare les clés par des virgules :");
-  console.log("   GEMINI_API_KEY=key1,key2,key3");
+// Vérification des clés API
+const hasGemini = GEMINI_API_KEYS.length > 0;
+const hasGroq = !!GROQ_API_KEY;
+const hasMistral = MISTRAL_API_KEYS.length > 0;
+
+if (!DISCORD_TOKEN) {
+  console.error("❌ Il manque DISCORD_TOKEN dans le fichier .env");
   process.exit(1);
 }
+
+if (!hasGemini && !hasGroq && !hasMistral) {
+  console.error("❌ Aucune clé API IA configurée !");
+  console.error("   Configure au moins une des clés suivantes dans .env :");
+  console.error("   - GEMINI_API_KEY (recommandé, sépare plusieurs clés par des virgules)");
+  console.error("   - GROQ_API_KEY (très rapide, quota généreux)");
+  console.error("   - MISTRAL_API_KEY (excellent en français, sépare plusieurs clés par des virgules)");
+  process.exit(1);
+}
+
+console.log("\n🤖 Configuration des providers IA :");
+if (hasGemini) console.log(`   ✅ Gemini: ${GEMINI_API_KEYS.length} clé(s) configurée(s)`);
+if (hasGroq) console.log(`   ✅ Groq: 1 clé configurée (14 400 req/jour, ultra rapide)`);
+if (hasMistral) console.log(`   ✅ Mistral: ${MISTRAL_API_KEYS.length} clé(s) configurée(s)`);
 
 const client = new Client({
   intents: [
@@ -230,7 +374,7 @@ const client = new Client({
 client.once("ready", () => {
   console.log(`✅ Mimir est en ligne : ${client.user.tag}`);
   console.log(`🔮 Déclencheur : messages commençant par "${TRIGGER_WORD}"`);
-  console.log(`🔑 Clés API Gemini configurées : ${GEMINI_API_KEYS.length} (rotation automatique si quota dépassé)`);
+  console.log(`� Rotation intelligente activée : ${hasGemini ? `Gemini(${GEMINI_API_KEYS.length})` : ""}${hasGemini && (hasGroq || hasMistral) ? " → " : ""}${hasGroq ? "Groq" : ""}${hasGroq && hasMistral ? " → " : ""}${hasMistral ? `Mistral(${MISTRAL_API_KEYS.length})` : ""}`);
 });
 
 client.on("messageCreate", async (message) => {
@@ -426,22 +570,88 @@ async function getMentionedChannelContext(message) {
   }
 }
 
-// Coupe-circuit partagé : après un 429 Gemini (quota dépassé), on évite de
+// Coupe-circuit partagé : après un 429 (quota dépassé), on évite de
 // gaspiller le peu de quota restant sur des appels "bonus" non essentiels
-// (ex: enrichissement de prompt d'image) pendant quelques minutes.
-let geminiCooldownUntil = 0;
+let aiCooldownUntil = 0;
 
 /**
- * Appelle l'API Gemini generateContent avec rotation automatique des clés API.
- * En cas de quota dépassé (429), passe à la clé suivante et réessaie.
+ * Appelle l'API IA actuelle (Gemini, Groq ou Mistral) avec rotation automatique.
+ * En cas de quota dépassé (429), passe au provider suivant et réessaie.
  */
-async function callGeminiGenerateContent(body, retryCount = 0) {
-  const currentKey = getGeminiApiKey();
-  if (!currentKey) {
-    throw new Error("Aucune clé API Gemini disponible");
-  }
+async function callAIGenerateContent(messages, config = {}) {
+  const maxRetries = GEMINI_API_KEYS.length + (GROQ_API_KEY ? 1 : 0) + MISTRAL_API_KEYS.length;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const providerConfig = getCurrentProviderConfig();
+    
+    if (!providerConfig) {
+      throw new Error(
+        "❌ Aucun provider IA disponible ! Configure au moins une clé API dans .env " +
+        "(GEMINI_API_KEY, GROQ_API_KEY ou MISTRAL_API_KEY)"
+      );
+    }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${currentKey}`;
+    try {
+      console.log(`🤖 Tentative ${attempt + 1}/${maxRetries} : ${providerConfig.provider} (${providerConfig.model})`);
+      
+      if (providerConfig.provider === "gemini") {
+        return await callGeminiAPI(messages, providerConfig, config);
+      } else if (providerConfig.provider === "groq") {
+        return await callGroqAPI(messages, providerConfig, config);
+      } else if (providerConfig.provider === "mistral") {
+        return await callMistralAPI(messages, providerConfig, config);
+      }
+    } catch (error) {
+      // Erreur 429 = quota dépassé, on passe au suivant
+      if (error.message.includes("429") || error.message.includes("quota") || error.message.includes("rate limit")) {
+        console.warn(`⚠️ Quota dépassé pour ${providerConfig.provider}`);
+        
+        if (switchToNextProvider()) {
+          console.log(`🔄 Passage au provider suivant...`);
+          continue; // Réessayer avec le nouveau provider
+        } else {
+          aiCooldownUntil = Date.now() + 60_000;
+          throw new Error(
+            `❌ Tous les quotas IA sont épuisés ! ` +
+            `Gemini: ${GEMINI_API_KEYS.length} clé(s), ` +
+            `Groq: ${GROQ_API_KEY ? "1 clé" : "non configuré"}, ` +
+            `Mistral: ${MISTRAL_API_KEYS.length} clé(s). ` +
+            `Attends la réinitialisation quotidienne ou ajoute plus de clés API.`
+          );
+        }
+      }
+      
+      // Autre erreur, on la remonte
+      throw error;
+    }
+  }
+  
+  throw new Error("❌ Échec après toutes les tentatives de rotation");
+}
+
+/**
+ * Appelle l'API Gemini
+ */
+async function callGeminiAPI(messages, providerConfig, config) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${providerConfig.model}:generateContent?key=${providerConfig.apiKey}`;
+  
+  const body = {
+    contents: messages.map(msg => ({
+      role: msg.role === "system" ? "user" : msg.role,
+      parts: [{ text: msg.content || msg.parts?.[0]?.text || "" }]
+    })),
+    generationConfig: {
+      temperature: config.temperature || 0.8,
+      maxOutputTokens: config.maxTokens || 1024,
+    },
+  };
+
+  // Ajouter l'instruction système si présente
+  if (config.systemInstruction) {
+    body.systemInstruction = {
+      parts: [{ text: config.systemInstruction }]
+    };
+  }
 
   const response = await fetch(url, {
     method: "POST",
@@ -450,36 +660,106 @@ async function callGeminiGenerateContent(body, retryCount = 0) {
   });
 
   if (!response.ok) {
-    if (response.status === 429) {
-      // Quota dépassé pour cette clé
-      console.warn(`⚠️ Quota dépassé pour la clé Gemini ${currentKeyIndex + 1}/${GEMINI_API_KEYS.length}`);
-      
-      // Si on a d'autres clés, on fait une rotation et on réessaie
-      if (rotateGeminiApiKey() && retryCount < GEMINI_API_KEYS.length) {
-        console.log(`🔄 Nouvelle tentative avec la clé ${currentKeyIndex + 1}...`);
-        return callGeminiGenerateContent(body, retryCount + 1);
-      }
-      
-      // Toutes les clés sont épuisées
-      geminiCooldownUntil = Date.now() + 60_000;
-      throw new Error(
-        `Quota gratuit Gemini dépassé pour toutes les clés API (${GEMINI_API_KEYS.length} clé(s)). ` +
-          `Le tier gratuit de Google peut être limité à seulement 20-50 requêtes/jour par clé selon les projets. ` +
-          `Solutions : attendre la réinitialisation quotidienne, ajouter plus de clés API dans .env ` +
-          `(sépare-les par des virgules), changer GEMINI_MODEL dans .env pour un modèle avec plus ` +
-          `de quota gratuit (ex: gemini-2.5-flash-lite), ou activer la facturation sur tes projets ` +
-          `Google AI Studio pour lever la limite.`
-      );
-    }
     const errText = await response.text();
     throw new Error(`Gemini API error ${response.status}: ${errText}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "(réponse vide)";
+  
+  return { text, provider: "gemini" };
 }
 
 /**
- * Envoie le prompt à l'API Gemini et retourne le texte généré.
+ * Appelle l'API Groq (OpenAI-compatible)
+ */
+async function callGroqAPI(messages, providerConfig, config) {
+  const url = "https://api.groq.com/openai/v1/chat/completions";
+  
+  const body = {
+    model: providerConfig.model,
+    messages: messages.map(msg => ({
+      role: msg.role === "system" ? "system" : (msg.role === "model" ? "assistant" : "user"),
+      content: msg.content || msg.parts?.[0]?.text || ""
+    })),
+    temperature: config.temperature || 0.8,
+    max_tokens: config.maxTokens || 1024,
+  };
+
+  // Ajouter l'instruction système si présente
+  if (config.systemInstruction && !body.messages.find(m => m.role === "system")) {
+    body.messages.unshift({
+      role: "system",
+      content: config.systemInstruction
+    });
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${providerConfig.apiKey}`
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Groq API error ${response.status}: ${errText}`);
+  }
+
+  const data = await response.json();
+  const text = data?.choices?.[0]?.message?.content || "(réponse vide)";
+  
+  return { text, provider: "groq" };
+}
+
+/**
+ * Appelle l'API Mistral (OpenAI-compatible)
+ */
+async function callMistralAPI(messages, providerConfig, config) {
+  const url = "https://api.mistral.ai/v1/chat/completions";
+  
+  const body = {
+    model: providerConfig.model,
+    messages: messages.map(msg => ({
+      role: msg.role === "system" ? "system" : (msg.role === "model" ? "assistant" : "user"),
+      content: msg.content || msg.parts?.[0]?.text || ""
+    })),
+    temperature: config.temperature || 0.8,
+    max_tokens: config.maxTokens || 1024,
+  };
+
+  // Ajouter l'instruction système si présente
+  if (config.systemInstruction && !body.messages.find(m => m.role === "system")) {
+    body.messages.unshift({
+      role: "system",
+      content: config.systemInstruction
+    });
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${providerConfig.apiKey}`
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Mistral API error ${response.status}: ${errText}`);
+  }
+
+  const data = await response.json();
+  const text = data?.choices?.[0]?.message?.content || "(réponse vide)";
+  
+  return { text, provider: "mistral" };
+}
+
+/**
+ * Envoie le prompt à l'API IA actuelle et retourne le texte généré.
  * Garde un petit historique par salon pour un semblant de mémoire.
  * Si channelContext est fourni, l'historique du salon mentionné est
  * injecté dans le prompt comme contexte.
@@ -495,32 +775,20 @@ async function askGemini(channelId, prompt, channelContext = null) {
       `Question de l'utilisateur : ${prompt}`;
   }
 
-  const contents = [
-    ...history,
-    { role: "user", parts: [{ text: finalPrompt }] },
+  const messages = [
+    ...history.map(h => ({ role: h.role, content: h.parts?.[0]?.text || "" })),
+    { role: "user", content: finalPrompt },
   ];
 
-  const data = await callGeminiGenerateContent({
-    contents,
-    systemInstruction: {
-      parts: [
-        {
-          text:
-            "Tu es Mimir, un assistant IA sur un serveur Discord. " +
-            "Réponds de façon claire, concise et utile. " +
-            "Utilise le markdown Discord (gras, listes, blocs de code) quand c'est pertinent.",
-        },
-      ],
-    },
-    generationConfig: {
-      temperature: 0.8,
-      maxOutputTokens: 1024,
-    },
+  const result = await callAIGenerateContent(messages, {
+    systemInstruction: "Tu es Mimir, un assistant IA sur un serveur Discord. " +
+      "Réponds de façon claire, concise et utile. " +
+      "Utilise le markdown Discord (gras, listes, blocs de code) quand c'est pertinent.",
+    temperature: 0.8,
+    maxTokens: 1024,
   });
 
-  const text =
-    data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") ||
-    "(réponse vide)";
+  const text = result.text;
 
   // Met à jour l'historique court par salon (on garde le prompt original,
   // sans le gros contexte du salon, pour ne pas saturer l'historique)
@@ -781,30 +1049,16 @@ async function enhanceImagePrompt(description) {
     `Demande originale : ${description}`;
 
   try {
-    const currentKey = getGeminiApiKey();
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${currentKey}`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: enhancingPrompt }] }],
-        generationConfig: { temperature: 0.9, maxOutputTokens: 200 },
-      }),
+    const result = await callAIGenerateContent([
+      { role: "user", content: enhancingPrompt }
+    ], {
+      temperature: 0.9,
+      maxTokens: 200
     });
-    if (!response.ok) {
-      if (response.status === 429 && rotateGeminiApiKey()) {
-        // Rotation et nouvelle tentative
-        return enhanceImagePrompt(description);
-      }
-      throw new Error(`Gemini API error ${response.status}`);
-    }
 
-    const data = await response.json();
-    const enhanced = data?.candidates?.[0]?.content?.parts
-      ?.map((p) => p.text)
-      .join("")
+    const enhanced = result.text
       .trim()
-      .replace(/^["']+|["']+$/g, "") // guillemets parasites que Gemini ajoute parfois
+      .replace(/^["']+|["']+$/g, "") // guillemets parasites
       .replace(/\s+/g, " "); // aplati d'éventuels retours à la ligne
 
     return enhanced || description;
@@ -911,29 +1165,14 @@ async function handleCsvChartRequest(message, prompt) {
     '{"title": "titre court", "chartType": "bar|line|pie", "labels": ["a","b","c"], "datasetLabel": "nom de la série", "values": [1,2,3]}\n\n' +
     `Demande de l'utilisateur : ${prompt}`;
 
-  const currentKey = getGeminiApiKey();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${currentKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: structuringPrompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
-    }),
+  const result = await callAIGenerateContent([
+    { role: "user", content: structuringPrompt }
+  ], {
+    temperature: 0.3,
+    maxTokens: 1024
   });
 
-  if (!response.ok) {
-    if (response.status === 429 && rotateGeminiApiKey()) {
-      // Rotation et nouvelle tentative
-      return handleCsvChartRequest(message, prompt);
-    }
-    throw new Error(`Gemini API error ${response.status}`);
-  }
-
-  const data = await response.json();
-  const rawText =
-    data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
-
+  const rawText = result.text;
   const cleaned = rawText.replace(/```json|```/g, "").trim();
   let parsed;
   try {
@@ -1006,23 +1245,14 @@ client.on("messageReactionAdd", async (reaction, user) => {
     const translationPrompt =
       `Traduis le texte suivant en ${targetLanguage}. Réponds UNIQUEMENT avec la traduction, sans commentaire ni guillemets :\n\n${originalText}`;
 
-    const currentKey = getGeminiApiKey();
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${currentKey}`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: translationPrompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 512 },
-      }),
+    const result = await callAIGenerateContent([
+      { role: "user", content: translationPrompt }
+    ], {
+      temperature: 0.3,
+      maxTokens: 512
     });
 
-    if (!response.ok) throw new Error(`Gemini API error ${response.status}`);
-
-    const data = await response.json();
-    const translation =
-      data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") ||
-      "(traduction vide)";
+    const translation = result.text || "(traduction vide)";
 
     await reaction.message.reply(
       `🌐 **Traduction (${targetLanguage}) :**\n${translation}`
