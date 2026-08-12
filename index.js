@@ -1471,6 +1471,7 @@ async function handleVoiceMessage(message, voiceAttachment) {
     const transcriptionResponse = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
       headers: {
+        ...formData.getHeaders(),
         Authorization: `Bearer ${GROQ_API_KEY}`,
       },
       body: formData,
@@ -1865,7 +1866,10 @@ async function transcribeAudio(audioBuffer, filename = "audio.wav", contentType 
 
   const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+    headers: {
+      ...form.getHeaders(),
+      Authorization: `Bearer ${GROQ_API_KEY}`
+    },
     body: form,
   });
 
