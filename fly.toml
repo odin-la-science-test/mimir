@@ -3,30 +3,15 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = "mimir-bot"
-primary_region = "cdg" # Paris - change si tu veux (lhr=London, fra=Frankfurt)
+app = 'mimir-bot'
+primary_region = 'cdg'
 
 [build]
 
 [env]
-  NODE_ENV = "production"
-  GEMINI_MODEL = "gemini-2.5-flash"
-  TTS_VOICE = "fr-FR-HenriNeural"
-
-[processes]
-  app = "node index.js"
-
-[[services]]
-  protocol = "tcp"
-  internal_port = 8080
-
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
+  GEMINI_MODEL = 'gemini-2.5-flash'
+  NODE_ENV = 'production'
+  TTS_VOICE = 'fr-FR-HenriNeural'
 
 [http_service]
   internal_port = 8080
@@ -34,9 +19,8 @@ primary_region = "cdg" # Paris - change si tu veux (lhr=London, fra=Frankfurt)
   auto_stop_machines = false
   auto_start_machines = false
   min_machines_running = 1
-  processes = ["app"]
 
 [[vm]]
-  cpu_kind = "shared"
+  memory = '256mb'
+  cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 256
