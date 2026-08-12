@@ -1460,7 +1460,10 @@ async function handleVoiceMessage(message, voiceAttachment) {
 
     // Transcrire avec Groq Whisper
     const formData = new FormData();
-    formData.append("file", new Blob([audioBuffer], { type: "audio/ogg" }), "voice.ogg");
+    formData.append("file", Buffer.from(audioBuffer), {
+      filename: "voice.ogg",
+      contentType: "audio/ogg"
+    });
     formData.append("model", "whisper-large-v3");
     formData.append("language", "fr");
     formData.append("response_format", "json");
@@ -1854,7 +1857,10 @@ async function askGroqForVoice(prompt) {
  */
 async function transcribeAudio(audioBuffer, filename = "audio.wav", contentType = "audio/wav") {
   const form = new FormData();
-  form.append("file", new Blob([audioBuffer], { type: contentType }), filename);
+  form.append("file", Buffer.from(audioBuffer), {
+    filename: filename,
+    contentType: contentType
+  });
   form.append("model", "whisper-large-v3-turbo");
 
   const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
