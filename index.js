@@ -32,7 +32,7 @@ const { Readable } = require("stream");
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
-const FormData = require("form-data");
+// Note: FormData est disponible globalement dans Node.js 18+
 
 // Patch pour msedge-tts : injecter crypto dans le contexte global
 if (typeof global.crypto === "undefined") {
