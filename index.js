@@ -1068,6 +1068,7 @@ function buildSyntheticWaveform() {
 async function sendNativeVoiceMessage(channelId, replyToMessageId, oggBuffer, durationSecs, waveformBase64) {
   const form = new FormData();
   const payload = {
+    // Les messages vocaux ne doivent PAS avoir de champ content selon la doc Discord
     flags: MessageFlags.IsVoiceMessage,
     attachments: [
       {
@@ -1106,6 +1107,8 @@ async function sendNativeVoiceMessage(channelId, replyToMessageId, oggBuffer, du
     const errorText = await response.text();
     throw new Error(`Discord API error: ${response.status} - ${errorText}`);
   }
+
+  return await response.json();
 
   return await response.json();
 }
