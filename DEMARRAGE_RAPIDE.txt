@@ -1,0 +1,69 @@
+═══════════════════════════════════════════════════════════════
+   🚀 DÉPLOIEMENT AUTOMATIQUE DE MIMIR SUR FLY.IO
+═══════════════════════════════════════════════════════════════
+
+✅ TOUT EST PRÊT ! Il ne reste que 3 choses à faire :
+
+═══════════════════════════════════════════════════════════════
+   ÉTAPE 1 : Ouvre PowerShell dans ce dossier
+═══════════════════════════════════════════════════════════════
+
+   Clic droit dans ce dossier > "Ouvrir dans le Terminal"
+   
+   OU tape dans PowerShell :
+   cd C:\Users\fcb1909-user\Desktop\mimir-bot
+
+═══════════════════════════════════════════════════════════════
+   ÉTAPE 2 : Lance le script de déploiement automatique
+═══════════════════════════════════════════════════════════════
+
+   .\deploy.ps1
+
+   Le script va :
+   • T'aider à te connecter à Fly.io (gratuit, sans CB)
+   • Te demander tes 3 clés API (Discord, Gemini, Groq)
+   • Créer et déployer ton bot automatiquement
+   • Afficher les logs
+
+   ⏱️  Durée : 5 minutes
+
+═══════════════════════════════════════════════════════════════
+   ÉTAPE 3 : Prépare tes clés API
+═══════════════════════════════════════════════════════════════
+
+   Tu auras besoin de :
+
+   1. DISCORD_TOKEN
+      → https://discord.com/developers/applications
+      → Ton application > Bot > Reset Token
+
+   2. GEMINI_API_KEY
+      → https://aistudio.google.com/apikey
+      → Create API key (gratuit, sans CB)
+
+   3. GROQ_API_KEY (optionnel, pour le module vocal)
+      → https://console.groq.com
+      → Crée un compte > API Keys (gratuit, sans CB)
+
+═══════════════════════════════════════════════════════════════
+   C'EST TOUT ! 🎉
+═══════════════════════════════════════════════════════════════
+
+Une fois déployé, ton bot tournera 24/7 GRATUITEMENT sur Fly.io !
+
+═══════════════════════════════════════════════════════════════
+   COMMANDES UTILES APRÈS DÉPLOIEMENT
+═══════════════════════════════════════════════════════════════
+
+   .\logs.ps1       → Voir les logs en temps réel
+   .\status.ps1     → Voir l'état du bot
+   .\update.ps1     → Mettre à jour après modification du code
+
+═══════════════════════════════════════════════════════════════
+
+   📖 Documentation complète :
+   - DEPLOYMENT.md     → Guide détaillé Fly.io
+   - SCRIPTS_README.md → Explications des scripts
+   - README.md         → Documentation du bot
+
+═══════════════════════════════════════════════════════════════
