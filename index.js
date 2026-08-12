@@ -30,8 +30,14 @@ const {
 const prism = require("prism-media");
 const { Readable } = require("stream");
 const { spawn } = require("child_process");
+const crypto = require("crypto");
 const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
 const FormData = require("form-data");
+
+// Patch pour msedge-tts : injecter crypto dans le contexte global
+if (typeof global.crypto === "undefined") {
+  global.crypto = crypto;
+}
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
