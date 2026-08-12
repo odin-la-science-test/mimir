@@ -1491,8 +1491,8 @@ async function handleVoiceMessage(message, voiceAttachment) {
 
     console.log(`📝 Transcription: "${transcribedText}"`);
 
-    // Envoyer la transcription
-    await message.reply(`🎤 **Message vocal transcrit :**\n> ${transcribedText}\n\n💭 *Je prépare ma réponse...*`);
+    // Afficher que le bot prépare sa réponse
+    await message.channel.sendTyping();
 
     // Générer une réponse IA
     const answerText = await callAIGenerateContent([
