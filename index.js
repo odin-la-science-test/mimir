@@ -31,6 +31,7 @@ const prism = require("prism-media");
 const { Readable } = require("stream");
 const { spawn } = require("child_process");
 const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
+const FormData = require("form-data");
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -1078,8 +1079,11 @@ async function sendNativeVoiceMessage(channelId, replyToMessageId, oggBuffer, du
   form.append("payload_json", JSON.stringify(payload));
   form.append(
     "files[0]",
-    new Blob([oggBuffer], { type: "audio/ogg" }),
-    "mimir-voice-message.ogg"
+    oggBuffer,
+    {
+      filename: "mimir-voice-message.ogg",
+      contentType: "audio/ogg"
+    }
   );
 
   await client.rest.post(Routes.channelMessages(channelId), { body: form });
