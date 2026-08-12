@@ -423,7 +423,9 @@ client.on("messageCreate", async (message) => {
     }
 
     // 0c. Réponse sous forme de message vocal Discord natif (note vocale) ?
-    if (VOICE_MESSAGE_TRIGGERS.some((t) => lowerPrompt.includes(t))) {
+    // DÉSACTIVÉ temporairement sur Fly.io car msedge-tts ne fonctionne pas de manière fiable
+    // Les messages vocaux dans les salons vocaux continuent de fonctionner
+    if (false && VOICE_MESSAGE_TRIGGERS.some((t) => lowerPrompt.includes(t))) {
       await handleVoiceMessageReply(message, prompt);
       return;
     }
