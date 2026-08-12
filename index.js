@@ -1459,11 +1459,11 @@ async function handleVoiceMessage(message, voiceAttachment) {
     console.log(`📥 Audio téléchargé: ${audioBuffer.byteLength} bytes`);
 
     // Transcrire avec Groq Whisper
+    // Créer un Blob avec le buffer audio
+    const audioBlob = new Blob([audioBuffer], { type: "audio/ogg" });
+    
     const formData = new FormData();
-    formData.append("file", Buffer.from(audioBuffer), {
-      filename: "voice.ogg",
-      contentType: "audio/ogg"
-    });
+    formData.append("file", audioBlob, "voice.ogg");
     formData.append("model", "whisper-large-v3");
     formData.append("language", "fr");
     formData.append("response_format", "json");
@@ -1471,7 +1471,6 @@ async function handleVoiceMessage(message, voiceAttachment) {
     const transcriptionResponse = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
       headers: {
-        ...formData.getHeaders(),
         Authorization: `Bearer ${GROQ_API_KEY}`,
       },
       body: formData,
@@ -1857,17 +1856,16 @@ async function askGroqForVoice(prompt) {
  * Accepte wav, ogg, mp3, m4a, webm... (formats supportés par Groq).
  */
 async function transcribeAudio(audioBuffer, filename = "audio.wav", contentType = "audio/wav") {
+  // Créer un Blob avec le buffer audio
+  const audioBlob = new Blob([audioBuffer], { type: contentType });
+  
   const form = new FormData();
-  form.append("file", Buffer.from(audioBuffer), {
-    filename: filename,
-    contentType: contentType
-  });
+  form.append("file", audioBlob, filename);
   form.append("model", "whisper-large-v3-turbo");
 
   const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
     method: "POST",
     headers: {
-      ...form.getHeaders(),
       Authorization: `Bearer ${GROQ_API_KEY}`
     },
     body: form,
