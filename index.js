@@ -423,9 +423,7 @@ client.on("messageCreate", async (message) => {
     }
 
     // 0c. Réponse sous forme de message vocal Discord natif (note vocale) ?
-    // DÉSACTIVÉ temporairement sur Fly.io car msedge-tts ne fonctionne pas de manière fiable
-    // Les messages vocaux dans les salons vocaux continuent de fonctionner
-    if (false && VOICE_MESSAGE_TRIGGERS.some((t) => lowerPrompt.includes(t))) {
+    if (VOICE_MESSAGE_TRIGGERS.some((t) => lowerPrompt.includes(t))) {
       await handleVoiceMessageReply(message, prompt);
       return;
     }
@@ -1893,106 +1891,21 @@ async function transcribeAudio(audioBuffer, filename = "audio.wav", contentType 
  * connexion persistante, mais beaucoup plus robuste (pas de connexion qui
  * traîne et devient invalide entre deux réponses).
  */
-async function synthesizeSpeechBuffer(text, voiceName, maxRetries = 3) {
-  let lastError = null;
-  
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    const tts = new MsEdgeTTS();
-    let streamClosed = false;
-    const chunks = []; // Déplacer ici pour être accessible dans le catch
-    let chunkCount = 0;
-    let hasReceivedData = false;
-    
-    try {
-      console.log(`🔄 Tentative TTS ${attempt}/${maxRetries} pour "${text.slice(0, 50)}..."`);
-      
-      await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-      const { audioStream } = tts.toStream(text);
-      
-      // Timeout de 45 secondes pour la synthèse (augmenté)
-      const timeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('TTS timeout après 45 secondes')), 45000)
-      );
-      
-      const streamPromise = new Promise((resolve, reject) => {
-        audioStream.on('data', (chunk) => {
-          chunks.push(chunk);
-          chunkCount++;
-          hasReceivedData = true;
-        });
-        
-        audioStream.on('end', () => {
-          resolve();
-        });
-        
-        audioStream.on('error', (err) => {
-          streamClosed = true;
-          reject(err);
-        });
-        
-        audioStream.on('close', () => {
-          streamClosed = true;
-          // Si on a reçu des données, considérer comme succès
-          if (hasReceivedData && chunks.length > 0) {
-            resolve();
-          } else {
-            reject(new Error('Stream fermé sans données'));
-          }
-        });
-      });
-      
-      await Promise.race([streamPromise, timeout]);
-      
-      // Attendre un peu pour s'assurer que tout est bien reçu
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      const buffer = Buffer.concat(chunks);
-      
-      // Vérifier que le buffer n'est pas vide
-      if (buffer.length === 0) {
-        throw new Error('Buffer audio vide');
-      }
-      
-      console.log(`✅ TTS réussi: ${buffer.length} octets (${chunkCount} chunks)`);
-      
-      try {
-        tts.close();
-      } catch (e) {
-        // Ignore
-      }
-      
-      return buffer;
-      
-    } catch (error) {
-      lastError = error;
-      console.error(`❌ Tentative TTS ${attempt}/${maxRetries} échouée:`, error.message);
-      
-      try {
-        tts.close();
-      } catch (closeError) {
-        // Ignore les erreurs de fermeture
-      }
-      
-      // Si on a des données partielles et que c'est juste une fermeture prématurée, on peut les utiliser
-      if (streamClosed && chunks && chunks.length > 0) {
-        const partialBuffer = Buffer.concat(chunks);
-        if (partialBuffer.length > 1000) { // Au moins 1KB de données
-          console.log(`⚠️ Utilisation des données partielles (${partialBuffer.length} octets)`);
-          return partialBuffer;
-        }
-      }
-      
-      // Attente exponentielle avant retry (2s, 4s, 8s...)
-      if (attempt < maxRetries) {
-        const waitTime = Math.pow(2, attempt) * 1000;
-        console.log(`⏳ Attente de ${waitTime}ms avant nouvelle tentative...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      }
+async function synthesizeSpeechBuffer(text, voiceName) {
+  const tts = new MsEdgeTTS();
+  await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+  const { audioStream } = tts.toStream(text);
+
+  const chunks = [];
+  try {
+    for await (const chunk of audioStream) {
+      chunks.push(chunk);
     }
+  } finally {
+    tts.close();
   }
-  
-  // Si toutes les tentatives ont échoué
-  throw new Error(`TTS a échoué après ${maxRetries} tentatives: ${lastError?.message || 'Erreur inconnue'}`);
+
+  return Buffer.concat(chunks);
 }
 
 /**
