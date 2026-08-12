@@ -4,14 +4,42 @@
 Write-Host "[DEPLOIEMENT] Mimir sur Fly.io" -ForegroundColor Cyan
 Write-Host ""
 
-# Etape 1: Verification de Fly CLI
+# Definir le chemin complet vers flyctl
+$flyctl = "$env:USERPROFILE\.fly\bin\flyctl.exe"
+
+# Etape 1: Verification et chargement de Fly CLI
 Write-Host "[ETAPE 1/6] Verification de Fly CLI..." -ForegroundColor Yellow
+
+if (-not (Test-Path $flyctl)) {
+    Write-Host "[ERREUR] Fly CLI n'est pas installe" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Installation automatique..." -ForegroundColor Yellow
+    
+    try {
+        iwr https://fly.io/install.ps1 -useb | iex
+        Start-Sleep -Seconds 2
+        
+        if (Test-Path $flyctl) {
+            Write-Host "[OK] Fly CLI installe!" -ForegroundColor Green
+        } else {
+            throw "Installation echouee"
+        }
+    } catch {
+        Write-Host "[ERREUR] Installation automatique echouee" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Installation manuelle requise:" -ForegroundColor Yellow
+        Write-Host "1. Ouvre PowerShell en ADMINISTRATEUR" -ForegroundColor White
+        Write-Host "2. Execute: iwr https://fly.io/install.ps1 -useb | iex" -ForegroundColor White
+        Write-Host "3. Relance ce script" -ForegroundColor White
+        exit 1
+    }
+}
+
 try {
-    $flyVersion = flyctl version
+    $flyVersion = & $flyctl version 2>&1
     Write-Host "[OK] Fly CLI installe: $flyVersion" -ForegroundColor Green
 } catch {
-    Write-Host "[ERREUR] Fly CLI n'est pas installe ou pas dans le PATH" -ForegroundColor Red
-    Write-Host "Ferme et rouvre PowerShell, puis reessaie." -ForegroundColor Yellow
+    Write-Host "[ERREUR] Probleme avec Fly CLI" -ForegroundColor Red
     exit 1
 }
 
@@ -19,7 +47,7 @@ Write-Host ""
 
 # Etape 2: Verification de l'authentification
 Write-Host "[ETAPE 2/6] Verification de l'authentification Fly.io..." -ForegroundColor Yellow
-$authStatus = flyctl auth whoami 2>&1
+$authStatus = & $flyctl auth whoami 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[INFO] Tu n'es pas connecte a Fly.io" -ForegroundColor Yellow
     Write-Host ""
@@ -29,7 +57,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Read-Host "Appuie sur Entree pour ouvrir la page de connexion"
     
-    flyctl auth login
+    & $flyctl auth login
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERREUR] Connexion echouee" -ForegroundColor Red
@@ -61,7 +89,7 @@ Write-Host ""
 
 # Etape 4: Lancer l'app (si pas deja fait)
 Write-Host "[ETAPE 4/6] Configuration de l'application Fly.io..." -ForegroundColor Yellow
-$appExists = flyctl apps list 2>&1 | Select-String "mimir-bot"
+$appExists = & $flyctl apps list 2>&1 | Select-String "mimir-bot"
 
 if (-not $appExists) {
     Write-Host "Creation d'une nouvelle app..." -ForegroundColor Cyan
@@ -75,7 +103,7 @@ if (-not $appExists) {
     Write-Host ""
     Read-Host "Appuie sur Entree quand tu es pret"
     
-    flyctl launch
+    & $flyctl launch
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERREUR] Echec du lancement" -ForegroundColor Red
@@ -90,11 +118,11 @@ Write-Host ""
 # Etape 5: Configurer les secrets
 Write-Host "[ETAPE 5/6] Configuration des secrets..." -ForegroundColor Yellow
 
-flyctl secrets set DISCORD_TOKEN="$discordToken" --stage
-flyctl secrets set GEMINI_API_KEY="$geminiKey" --stage
+& $flyctl secrets set DISCORD_TOKEN="$discordToken" --stage
+& $flyctl secrets set GEMINI_API_KEY="$geminiKey" --stage
 
 if ($groqKey -ne "") {
-    flyctl secrets set GROQ_API_KEY="$groqKey" --stage
+    & $flyctl secrets set GROQ_API_KEY="$groqKey" --stage
 }
 
 Write-Host "[OK] Secrets configures!" -ForegroundColor Green
@@ -105,7 +133,7 @@ Write-Host "[ETAPE 6/6] Deploiement en cours..." -ForegroundColor Yellow
 Write-Host "Cela prend 2-3 minutes (construction Docker + deploiement)..." -ForegroundColor Cyan
 Write-Host ""
 
-flyctl deploy
+& $flyctl deploy
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERREUR] Deploiement echoue" -ForegroundColor Red
@@ -121,14 +149,12 @@ Write-Host ""
 Write-Host "Mimir tourne maintenant 24/7 sur Fly.io!" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Commandes utiles:" -ForegroundColor Yellow
-Write-Host "  flyctl logs                  # Voir les logs en temps reel" -ForegroundColor White
-Write-Host "  flyctl status                # Voir l'etat du bot" -ForegroundColor White
-Write-Host "  flyctl apps restart          # Redemarrer le bot" -ForegroundColor White
-Write-Host "  flyctl dashboard             # Ouvrir le dashboard web" -ForegroundColor White
+Write-Host "  .\logs.ps1                   # Voir les logs en temps reel" -ForegroundColor White
+Write-Host "  .\status.ps1                 # Voir l'etat du bot" -ForegroundColor White
 Write-Host ""
 Write-Host "Affichage des logs dans 3 secondes..." -ForegroundColor Yellow
 Write-Host ""
 
 Start-Sleep -Seconds 3
 
-flyctl logs
+& $flyctl logs
