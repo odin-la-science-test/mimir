@@ -1059,56 +1059,88 @@ function buildSyntheticWaveform() {
 }
 
 /**
- * Envoie un message vocal Discord natif via un appel REST direct (contourne
- * message.reply/channel.send, qui laissent tomber silencieusement les
- * champs duration_secs et waveform pourtant obligatoires pour ce type de
- * message — sans eux, l'API Discord renvoie "Voice messages must have
- * supporting metadata").
+ * Envoie un message vocal Discord natif via l'API en 3 étapes :
+ * 1. Demande une URL d'upload
+ * 2. Upload le fichier audio
+ * 3. Envoie le message avec les métadonnées
  */
 async function sendNativeVoiceMessage(channelId, replyToMessageId, oggBuffer, durationSecs, waveformBase64) {
-  const form = new FormData();
-  const payload = {
-    // Les messages vocaux ne doivent PAS avoir de champ content selon la doc Discord
-    flags: MessageFlags.IsVoiceMessage,
-    attachments: [
-      {
-        id: "0",
-        filename: "mimir-voice-message.ogg",
-        duration_secs: durationSecs,
-        waveform: waveformBase64,
-      },
-    ],
-  };
-  if (replyToMessageId) {
-    payload.message_reference = { message_id: replyToMessageId, fail_if_not_exists: false };
-  }
+  const filename = "voice-message.ogg";
+  const fileSize = oggBuffer.length;
 
-  form.append("payload_json", JSON.stringify(payload));
-  form.append(
-    "files[0]",
-    oggBuffer,
-    {
-      filename: "mimir-voice-message.ogg",
-      contentType: "audio/ogg"
-    }
-  );
-
-  // Utiliser fetch directement avec les bons headers
-  const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+  // Étape 1 : Demander une URL d'upload
+  const attachmentResponse = await fetch(`https://discord.com/api/v10/channels/${channelId}/attachments`, {
     method: "POST",
     headers: {
-      ...form.getHeaders(),
+      "Content-Type": "application/json",
       Authorization: `Bot ${DISCORD_TOKEN}`,
     },
-    body: form,
+    body: JSON.stringify({
+      files: [{
+        filename: filename,
+        file_size: fileSize,
+        id: "0"
+      }]
+    }),
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Discord API error: ${response.status} - ${errorText}`);
+  if (!attachmentResponse.ok) {
+    const errorText = await attachmentResponse.text();
+    throw new Error(`Discord attachment request error: ${attachmentResponse.status} - ${errorText}`);
   }
 
-  return await response.json();
+  const attachmentData = await attachmentResponse.json();
+  const uploadUrl = attachmentData.attachments[0].upload_url;
+  const uploadedFilename = attachmentData.attachments[0].upload_filename;
+
+  // Étape 2 : Upload le fichier OGG
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "audio/ogg",
+    },
+    body: oggBuffer,
+  });
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text();
+    throw new Error(`Discord file upload error: ${uploadResponse.status} - ${errorText}`);
+  }
+
+  // Étape 3 : Envoyer le message vocal
+  const messagePayload = {
+    flags: MessageFlags.IsVoiceMessage,
+    attachments: [{
+      id: "0",
+      filename: filename,
+      uploaded_filename: uploadedFilename,
+      duration_secs: durationSecs,
+      waveform: waveformBase64,
+    }],
+  };
+
+  if (replyToMessageId) {
+    messagePayload.message_reference = {
+      message_id: replyToMessageId,
+      fail_if_not_exists: false
+    };
+  }
+
+  const messageResponse = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bot ${DISCORD_TOKEN}`,
+    },
+    body: JSON.stringify(messagePayload),
+  });
+
+  if (!messageResponse.ok) {
+    const errorText = await messageResponse.text();
+    throw new Error(`Discord message send error: ${messageResponse.status} - ${errorText}`);
+  }
+
+  return await messageResponse.json();
 
   return await response.json();
 }
