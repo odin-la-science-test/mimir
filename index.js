@@ -40,7 +40,33 @@ if (typeof global.crypto === "undefined") {
 }
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+// Système de rotation d'API keys Gemini pour cumuler les quotas gratuits
+const GEMINI_API_KEYS = process.env.GEMINI_API_KEY
+  ? process.env.GEMINI_API_KEY.split(",").map(k => k.trim()).filter(k => k.length > 0)
+  : [];
+let currentKeyIndex = 0;
+
+// Fonction pour obtenir la clé API Gemini actuelle avec rotation automatique
+function getGeminiApiKey() {
+  if (GEMINI_API_KEYS.length === 0) {
+    return null;
+  }
+  return GEMINI_API_KEYS[currentKeyIndex];
+}
+
+// Fonction pour passer à la clé suivante en cas d'erreur de quota
+function rotateGeminiApiKey() {
+  if (GEMINI_API_KEYS.length <= 1) {
+    console.warn("⚠️ Une seule clé API Gemini configurée, impossible de faire une rotation");
+    return false;
+  }
+  const oldIndex = currentKeyIndex;
+  currentKeyIndex = (currentKeyIndex + 1) % GEMINI_API_KEYS.length;
+  console.log(`🔄 Rotation API Gemini : clé ${oldIndex + 1} → clé ${currentKeyIndex + 1} (sur ${GEMINI_API_KEYS.length})`);
+  return true;
+}
+
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const GROQ_API_KEY = process.env.GROQ_API_KEY; // pour la transcription vocale (Whisper)
 // Voix française pour la synthèse vocale (Microsoft Edge TTS, gratuit, sans clé).
@@ -181,10 +207,12 @@ const MIN_AUDIO_BYTES = VOICE_SAMPLE_RATE * VOICE_CHANNELS * 2 * 0.3; // ignore 
 // Connexions vocales actives par serveur (guildId -> { connection, textChannel })
 const activeVoiceSessions = new Map();
 
-if (!DISCORD_TOKEN || !GEMINI_API_KEY) {
+if (!DISCORD_TOKEN || GEMINI_API_KEYS.length === 0) {
   console.error(
     "❌ Il manque DISCORD_TOKEN ou GEMINI_API_KEY dans le fichier .env"
   );
+  console.log("💡 Pour cumuler plusieurs quotas Gemini gratuits, sépare les clés par des virgules :");
+  console.log("   GEMINI_API_KEY=key1,key2,key3");
   process.exit(1);
 }
 
@@ -202,6 +230,7 @@ const client = new Client({
 client.once("ready", () => {
   console.log(`✅ Mimir est en ligne : ${client.user.tag}`);
   console.log(`🔮 Déclencheur : messages commençant par "${TRIGGER_WORD}"`);
+  console.log(`🔑 Clés API Gemini configurées : ${GEMINI_API_KEYS.length} (rotation automatique si quota dépassé)`);
 });
 
 client.on("messageCreate", async (message) => {
@@ -403,12 +432,16 @@ async function getMentionedChannelContext(message) {
 let geminiCooldownUntil = 0;
 
 /**
- * Appelle l'API Gemini generateContent et transforme un 429 (quota gratuit
- * dépassé — parfois seulement 20-50 requêtes/jour selon Google) en message
- * clair et actionnable, au lieu de faire remonter le JSON brut à l'utilisateur.
+ * Appelle l'API Gemini generateContent avec rotation automatique des clés API.
+ * En cas de quota dépassé (429), passe à la clé suivante et réessaie.
  */
-async function callGeminiGenerateContent(body) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+async function callGeminiGenerateContent(body, retryCount = 0) {
+  const currentKey = getGeminiApiKey();
+  if (!currentKey) {
+    throw new Error("Aucune clé API Gemini disponible");
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${currentKey}`;
 
   const response = await fetch(url, {
     method: "POST",
@@ -418,12 +451,23 @@ async function callGeminiGenerateContent(body) {
 
   if (!response.ok) {
     if (response.status === 429) {
-      geminiCooldownUntil = Date.now() + 60_000; // pause de 60s avant de retenter des appels "bonus"
+      // Quota dépassé pour cette clé
+      console.warn(`⚠️ Quota dépassé pour la clé Gemini ${currentKeyIndex + 1}/${GEMINI_API_KEYS.length}`);
+      
+      // Si on a d'autres clés, on fait une rotation et on réessaie
+      if (rotateGeminiApiKey() && retryCount < GEMINI_API_KEYS.length) {
+        console.log(`🔄 Nouvelle tentative avec la clé ${currentKeyIndex + 1}...`);
+        return callGeminiGenerateContent(body, retryCount + 1);
+      }
+      
+      // Toutes les clés sont épuisées
+      geminiCooldownUntil = Date.now() + 60_000;
       throw new Error(
-        `Quota gratuit Gemini dépassé pour le modèle "${GEMINI_MODEL}". Le tier gratuit de Google ` +
-          `peut être limité à seulement 20-50 requêtes/jour selon les projets. Solutions : attendre ` +
-          `la réinitialisation quotidienne, changer GEMINI_MODEL dans .env pour un modèle avec plus ` +
-          `de quota gratuit (ex: gemini-2.5-flash-lite), ou activer la facturation sur ton projet ` +
+        `Quota gratuit Gemini dépassé pour toutes les clés API (${GEMINI_API_KEYS.length} clé(s)). ` +
+          `Le tier gratuit de Google peut être limité à seulement 20-50 requêtes/jour par clé selon les projets. ` +
+          `Solutions : attendre la réinitialisation quotidienne, ajouter plus de clés API dans .env ` +
+          `(sépare-les par des virgules), changer GEMINI_MODEL dans .env pour un modèle avec plus ` +
+          `de quota gratuit (ex: gemini-2.5-flash-lite), ou activer la facturation sur tes projets ` +
           `Google AI Studio pour lever la limite.`
       );
     }
@@ -737,7 +781,8 @@ async function enhanceImagePrompt(description) {
     `Demande originale : ${description}`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+    const currentKey = getGeminiApiKey();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${currentKey}`;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -746,7 +791,13 @@ async function enhanceImagePrompt(description) {
         generationConfig: { temperature: 0.9, maxOutputTokens: 200 },
       }),
     });
-    if (!response.ok) throw new Error(`Gemini API error ${response.status}`);
+    if (!response.ok) {
+      if (response.status === 429 && rotateGeminiApiKey()) {
+        // Rotation et nouvelle tentative
+        return enhanceImagePrompt(description);
+      }
+      throw new Error(`Gemini API error ${response.status}`);
+    }
 
     const data = await response.json();
     const enhanced = data?.candidates?.[0]?.content?.parts
@@ -860,7 +911,8 @@ async function handleCsvChartRequest(message, prompt) {
     '{"title": "titre court", "chartType": "bar|line|pie", "labels": ["a","b","c"], "datasetLabel": "nom de la série", "values": [1,2,3]}\n\n' +
     `Demande de l'utilisateur : ${prompt}`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+  const currentKey = getGeminiApiKey();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${currentKey}`;
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -871,6 +923,10 @@ async function handleCsvChartRequest(message, prompt) {
   });
 
   if (!response.ok) {
+    if (response.status === 429 && rotateGeminiApiKey()) {
+      // Rotation et nouvelle tentative
+      return handleCsvChartRequest(message, prompt);
+    }
     throw new Error(`Gemini API error ${response.status}`);
   }
 
@@ -950,7 +1006,8 @@ client.on("messageReactionAdd", async (reaction, user) => {
     const translationPrompt =
       `Traduis le texte suivant en ${targetLanguage}. Réponds UNIQUEMENT avec la traduction, sans commentaire ni guillemets :\n\n${originalText}`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+    const currentKey = getGeminiApiKey();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${currentKey}`;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
