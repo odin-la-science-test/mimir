@@ -1092,7 +1092,22 @@ async function sendNativeVoiceMessage(channelId, replyToMessageId, oggBuffer, du
     }
   );
 
-  await client.rest.post(Routes.channelMessages(channelId), { body: form });
+  // Utiliser fetch directement avec les bons headers
+  const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+    method: "POST",
+    headers: {
+      ...form.getHeaders(),
+      Authorization: `Bot ${DISCORD_TOKEN}`,
+    },
+    body: form,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Discord API error: ${response.status} - ${errorText}`);
+  }
+
+  return await response.json();
 }
 
 /**
