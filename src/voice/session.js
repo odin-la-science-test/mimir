@@ -227,31 +227,25 @@ async function joinVoiceAndListen(message) {
     guildId: voiceChannel.guild.id,
     adapterCreator: voiceChannel.guild.voiceAdapterCreator,
     selfDeaf: false,
-    debug: true,
   });
 
-  // Instrumentation de diagnostic : voir docs/adr/0003 — l'hypothèse d'un
-  // blocage UDP général a été invalidée par un test de contrôle (STUN
-  // Cloudflare/DNS Google répondent normalement), donc l'échec vient de
-  // quelque chose de plus précis dans la négociation vocale Discord. Ces
-  // logs servent à localiser exactement où ça coince (utile pour
-  // interpréter `flyctl logs` après un nouvel essai).
+  // Diagnostic minimal : voir docs/adr/0013 — le code de fermeture WS
+  // exact (4006, 4014, 4017...) n'est pas exposé par le canal "debug"
+  // standard, donc on l'intercepte directement sur l'objet networking.
+  // ⚠️ Ne JAMAIS JSON.stringify l'objet `state` du networking (contient
+  // des sockets/timers avec des références circulaires — une tentative
+  // précédente a fait planter tout le process avec une exception non
+  // interceptée en dehors de ce try/catch, tuant la connexion vocale ET
+  // le bot entier).
   let trackedNetworking = null;
-  connection.on("debug", (msg) => console.log(`[voice debug] ${msg}`));
   connection.on("stateChange", (oldState, newState) => {
-    // Le code de fermeture WebSocket exact (4006, 4014, 4022...) que Discord
-    // envoie n'est pas inclus dans le canal "debug" standard — on l'intercepte
-    // directement sur l'objet networking interne, seul endroit où il transite.
     if (newState.networking && newState.networking !== trackedNetworking) {
       trackedNetworking = newState.networking;
       trackedNetworking.once("close", (code) =>
         console.log(`[voice networking close] code Discord = ${code}`)
       );
     }
-    console.log(
-      `[voice state] ${oldState.status} → ${newState.status}` +
-        (newState.networking?.state ? ` (networking: ${JSON.stringify(newState.networking.state)})` : "")
-    );
+    console.log(`[voice state] ${oldState.status} → ${newState.status}`);
   });
 
   try {
