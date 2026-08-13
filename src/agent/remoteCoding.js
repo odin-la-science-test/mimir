@@ -66,12 +66,14 @@ async function handleRemoteCodingRequest(message, prompt) {
     if (result.success) {
       await message.channel.send(`✅ **Tâche terminée.**\n${result.summary}`.slice(0, 2000));
     } else {
-      await message.channel.send(
-        `⚠️ **La tâche a échoué.**\n${result.error || result.summary || "Aucun détail fourni."}`.slice(0, 2000)
-      );
+      // Le détail technique (trace, code de sortie...) reste dans les logs
+      // du bot et le terminal de l'agent local, pas affiché dans Discord.
+      console.error("Tâche de codage à distance échouée :", result.error || result.summary);
+      await message.channel.send("❌ La tâche a échoué — voir les logs du bot ou le terminal de l'agent local pour le détail.");
     }
   } catch (err) {
-    await message.channel.send(`⚠️ Erreur pendant l'exécution à distance : ${err.message}`);
+    console.error("Erreur pendant l'exécution à distance :", err.message);
+    await message.channel.send("❌ La tâche a échoué — voir les logs du bot ou le terminal de l'agent local pour le détail.");
   }
 }
 
