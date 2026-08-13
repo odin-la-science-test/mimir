@@ -11,6 +11,11 @@ async function transcribeAudio(audioBuffer, filename = "audio.wav", contentType 
   const form = new FormData();
   form.append("file", audioBlob, filename);
   form.append("model", "whisper-large-v3-turbo");
+  form.append("language", "fr");
+  // Indice de vocabulaire : Whisper transcrit parfois "Mimir" en "Amir"
+  // (perte du son "M" initial) sans ce contexte — un prompt qui contient
+  // le mot déclencheur améliore nettement sa reconnaissance.
+  form.append("prompt", "Conversation avec l'assistant vocal Mimir.");
 
   const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
     method: "POST",

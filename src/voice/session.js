@@ -2,13 +2,11 @@
 // Session vocale temps réel : rejoindre/quitter un salon vocal, écouter
 // les participants, transcrire et répondre.
 //
-// ⚠️ Contrainte d'hébergement documentée dans
-// docs/adr/0003-contrainte-hebergement-vocal-temps-reel.md : les
-// connexions vocales Discord nécessitent un flux UDP soutenu que
-// certaines plateformes (Fly.io notamment) routent mal. Ce module fait
-// tout ce qui est possible côté code (timeout généreux, nettoyage
-// systématique de la connexion), mais ne peut pas contourner une
-// limitation réseau de l'hébergeur.
+// Nécessite @discordjs/voice >= 0.19 (protocole DAVE, obligatoire côté
+// Discord depuis mars 2026) — voir
+// docs/adr/0013-cause-reelle-echec-vocal-dave.md. Une piste antérieure
+// (contrainte réseau/hébergeur, docs/adr/0003) s'est révélée fausse ;
+// conservée par transparence mais supersédée.
 // ============================================================
 
 const {
@@ -96,6 +94,27 @@ async function leaveVoice(guildId, announceText) {
 }
 
 /**
+ * Cherche le mot déclencheur n'importe où dans la transcription (pas
+ * seulement en tout premier mot) et retourne ce qui suit, nettoyé de la
+ * ponctuation de bordure. Retourne null si le mot n'apparaît pas.
+ *
+ * À l'oral, personne ne commence une phrase par un mot de commande sec :
+ * on dit "Bonjour Mimir, ..." ou Whisper entoure la phrase de guillemets
+ * français ("« Mimir, qui es-tu ? »") quand le ton sonne comme une
+ * adresse à quelqu'un — une simple vérification `startsWith` ratait donc
+ * la quasi-totalité des vraies invocations en conditions réelles.
+ */
+function extractSpokenPrompt(transcript, triggerWord) {
+  const escaped = triggerWord.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "iu").exec(transcript);
+  if (!match) return null;
+  return transcript
+    .slice(match.index + match[0].length)
+    .replace(/^[\s,:;.!?'"«»\-]+/, "")
+    .trim();
+}
+
+/**
  * Capture l'audio d'un utilisateur qui parle, jusqu'à un silence, le
  * décode en PCM, puis le transcrit via Groq Whisper. Si la transcription
  * commence par "mimir", traite ça comme une commande vocale.
@@ -145,13 +164,12 @@ async function handleUserSpeaking(connection, guildId, userId) {
       return;
     }
 
-    if (!lowerTranscript.startsWith(TRIGGER_WORD)) {
-      console.log(`↳ Ignoré : ne commence pas par "${TRIGGER_WORD}" (donc pas adressé à Mimir).`);
+    const spokenPrompt = extractSpokenPrompt(transcript, TRIGGER_WORD);
+    if (spokenPrompt === null) {
+      console.log(`↳ Ignoré : "${TRIGGER_WORD}" non détecté (donc pas adressé à Mimir).`);
       return;
     }
-
-    const spokenPrompt = transcript.trim().slice(TRIGGER_WORD.length).trim();
-    if (!spokenPrompt) return;
+    if (!spokenPrompt) return; // "mimir" dit seul, sans question derrière
 
     if (session.textChannel) {
       await session.textChannel.send(`🎤 *"${transcript.trim()}"*`);
