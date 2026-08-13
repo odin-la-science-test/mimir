@@ -28,3 +28,4 @@ derrière le code, pas seulement le **quoi**. Chacune suit le même format :
 | [0011](0011-tts-google-cloud-si-edge-bloque.md) | Google Cloud TTS comme provider primaire si configuré |
 | [0012](0012-choix-final-tts-elevenlabs.md) | Choix final du provider TTS : ElevenLabs (vs Google/Piper) |
 | [0013](0013-cause-reelle-echec-vocal-dave.md) | Cause réelle du vocal temps réel : protocole DAVE manquant (supersède 0003) |
+| [0014](0014-limitation-cache-discordjs.md) | Limitation du cache interne de discord.js (fix OOM) |

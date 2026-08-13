@@ -10,7 +10,7 @@
 process.env.FFMPEG_PATH = process.env.FFMPEG_PATH || require("ffmpeg-static");
 console.log(`🎬 ffmpeg utilisé : ${process.env.FFMPEG_PATH}`);
 
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, Options } = require("discord.js");
 
 const config = require("./src/config");
 config.assertRequiredConfig();
@@ -40,6 +40,26 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates,
   ],
   partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User],
+  // La machine de production tourne avec 256 Mo de RAM (fly.toml) : par
+  // défaut, discord.js met en cache indéfiniment tout message/réaction/
+  // présence vu passer, ce qui grossit sans limite sur une session
+  // longue. Cette fonctionnalité ne s'appuie jamais sur ce cache long
+  // terme (channels/contextReader.js fait toujours un fetch() explicite
+  // à la demande), donc le brider ne change aucun comportement — voir
+  // docs/adr/0014-limitation-cache-discordjs.md.
+  makeCache: Options.cacheWithLimits({
+    MessageManager: 50,
+    PresenceManager: 0,
+    GuildStickerManager: 0,
+    GuildScheduledEventManager: 0,
+    ThreadManager: 0,
+    ThreadMemberManager: 0,
+    StageInstanceManager: 0,
+    AutoModerationRuleManager: 0,
+  }),
+  sweepers: {
+    messages: { interval: 300, lifetime: 900 }, // purge les messages en cache > 15 min toutes les 5 min
+  },
 });
 
 client.once("clientReady", () => {
