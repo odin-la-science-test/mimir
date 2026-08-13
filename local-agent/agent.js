@@ -50,11 +50,19 @@ function runClaudeCode(projectPath, instruction) {
 
     console.log(`🛠️  Tâche reçue sur "${projectPath}" : ${instruction}`);
 
+    // L'instruction est envoyée via stdin, PAS comme argument -p direct :
+    // sur Windows, shell:true fait repasser les arguments par cmd.exe, dont
+    // le (re)découpage des guillemets/accents est documenté comme non fiable
+    // par Node lui-même (voir DEP0190). stdin est un flux d'octets pur, sans
+    // interprétation shell, donc insensible à ce problème quel que soit le
+    // contenu de l'instruction.
     const proc = spawn(
       "claude",
-      ["-p", instruction, "--output-format", "json", "--permission-mode", "acceptEdits"],
+      ["-p", "--output-format", "json", "--permission-mode", "acceptEdits"],
       { cwd: projectPath, shell: true }
     );
+    proc.stdin.write(instruction, "utf-8");
+    proc.stdin.end();
 
     let stdout = "";
     let stderr = "";
