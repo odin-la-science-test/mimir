@@ -262,10 +262,11 @@ async function joinVoiceAndListen(message) {
     connection.destroy();
     await message.reply(
       `⚠️ Impossible de rejoindre le vocal (timeout après ${VOICE_CONNECT_TIMEOUT_MS / 1000}s). ` +
-        `État: ${connection.state.status}. ` +
-        "Diagnostic en cours — voir `docs/adr/0003-contrainte-hebergement-vocal-temps-reel.md`. " +
-        "Les messages vocaux natifs (`mimir message vocal ...`) restent utilisables, eux, car ils " +
-        "n'utilisent que l'API REST."
+        `État: ${connection.state.status}. Vérifie les logs du bot pour le code de fermeture exact ` +
+        "(voir `docs/adr/0013-cause-reelle-echec-vocal-dave.md` pour un diagnostic connu : le code " +
+        "4017 signifie que le protocole DAVE requis par Discord n'est pas supporté par la version " +
+        "installée de `@discordjs/voice`). Les messages vocaux natifs (`mimir message vocal ...`) " +
+        "restent utilisables entre-temps."
     );
     return;
   }

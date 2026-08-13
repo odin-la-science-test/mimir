@@ -1,8 +1,12 @@
 # ADR 0003 — Contrainte d'hébergement du vocal temps réel
 
 ## Statut
-Accepté — constat honnête d'une limite d'infrastructure, inviolable dans
-sa formulation (ne pas prétendre que le code seul peut la résoudre).
+⚠️ **SUPERSEDÉ par [ADR 0013](0013-cause-reelle-echec-vocal-dave.md).**
+Cet ADR documente une investigation qui s'est révélée fondée sur une
+hypothèse erronée : conservé tel quel (y compris les conclusions
+intermédiaires invalidées) pour la valeur pédagogique du cheminement —
+voir ADR 0013 pour la cause réelle et le fix. Ne pas relire cet ADR
+comme une source de vérité sur la cause du problème.
 
 ## Contexte
 Rejoindre un salon vocal Discord (`joinVoiceChannel` de `@discordjs/voice`)

@@ -224,9 +224,9 @@ ne pas confondre :
 | | Voix temps réel | Message vocal natif |
 |---|---|---|
 | Déclencheur | `mimir rejoins le vocal` | `mimir message vocal <question>` |
-| Transport | WebSocket + **UDP** (gateway vocal Discord) | **HTTP REST** pur |
-| Fonctionne sur Fly.io ? | ⚠️ Dépend du routage UDP de l'hébergeur | ✅ Toujours |
-| Documentation | [ADR 0003](docs/adr/0003-contrainte-hebergement-vocal-temps-reel.md) | [ADR 0004](docs/adr/0004-protocole-messages-vocaux-natifs.md) |
+| Transport | WebSocket + UDP (gateway vocal Discord) | **HTTP REST** pur |
+| Prérequis | `@discordjs/voice ^0.19.2`+ (support du protocole DAVE, obligatoire depuis le 02/03/2026) | Aucun |
+| Documentation | [ADR 0013](docs/adr/0013-cause-reelle-echec-vocal-dave.md) | [ADR 0004](docs/adr/0004-protocole-messages-vocaux-natifs.md) |
 
 ### Voix temps réel
 ```mermaid
@@ -379,10 +379,11 @@ vocale active. Voir [ADR 0002](docs/adr/0002-serveur-http-de-health-check.md).
 flyctl deploy
 ```
 
-La voix temps réel peut être instable selon le routage UDP de
-l'hébergeur (voir [ADR 0003](docs/adr/0003-contrainte-hebergement-vocal-temps-reel.md)) ;
-les messages vocaux natifs et toutes les autres fonctionnalités
-(HTTP REST) ne sont pas concernés par cette contrainte.
+La voix temps réel nécessite `@discordjs/voice ^0.19.2`+ (protocole
+DAVE, obligatoire côté Discord depuis mars 2026) — voir
+[ADR 0013](docs/adr/0013-cause-reelle-echec-vocal-dave.md) pour
+l'historique du diagnostic (une hypothèse de blocage UDP a d'abord été
+explorée et invalidée avant de trouver la vraie cause).
 
 ---
 
