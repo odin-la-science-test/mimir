@@ -57,6 +57,28 @@ plateformes. Un VPS classique (IP dédiée, pas de NAT partagé
 multi-tenant, contrôle total de la stack réseau) reste la seule option
 non testée à ce stade susceptible de lever la contrainte.
 
+**Expérience du 13 août 2026 : test UDP brut, indépendant de Discord —
+preuve décisive.** Pour écarter toute hypothèse liée spécifiquement au
+protocole ou à la librairie `@discordjs/voice`, un test isolé a été fait
+directement depuis la machine Fly.io de production (`flyctl ssh
+console`) : envoi d'une requête STUN standard (protocole UDP générique
+de découverte d'adresse réseau, utilisé par WebRTC entre autres — sans
+rapport avec Discord) vers `stun.l.google.com:19302`, un service public
+connu pour répondre de façon fiable. **Résultat : aucune réponse reçue
+après 5 secondes**, alors que l'envoi lui-même n'a levé aucune erreur
+(le paquet part, mais rien ne revient — ou le paquet ne part jamais
+réellement malgré l'absence d'erreur au niveau du socket). Ce test ne
+dépend d'aucune spécificité du protocole voix de Discord : il établit
+que **l'UDP sortant vers des hôtes arbitraires d'Internet ne fonctionne
+pas de façon fiable sur cette machine Fly.io** (`shared-cpu-1x`, IPv4
+partagée, pas d'adresse dédiée). C'est la preuve la plus directe
+obtenue à ce jour, et elle explique aussi *pourquoi* Render présente le
+même symptôme (§ expérience précédente) : les plateformes PaaS
+orientées HTTP/TCP, dont l'infrastructure est share-tenant et souvent
+peu ou pas testée pour du trafic UDP client soutenu vers des
+destinations arbitraires, ne sont probablement simplement pas conçues
+pour ce cas d'usage — indépendamment du fournisseur précis.
+
 ## Décision
 1. Ne pas prétendre résoudre ce problème uniquement par du code applicatif.
 2. Porter le délai d'attente de connexion à 60 secondes
