@@ -227,6 +227,21 @@ async function joinVoiceAndListen(message) {
     guildId: voiceChannel.guild.id,
     adapterCreator: voiceChannel.guild.voiceAdapterCreator,
     selfDeaf: false,
+    debug: true,
+  });
+
+  // Instrumentation de diagnostic : voir docs/adr/0003 — l'hypothèse d'un
+  // blocage UDP général a été invalidée par un test de contrôle (STUN
+  // Cloudflare/DNS Google répondent normalement), donc l'échec vient de
+  // quelque chose de plus précis dans la négociation vocale Discord. Ces
+  // logs servent à localiser exactement où ça coince (utile pour
+  // interpréter `flyctl logs` après un nouvel essai).
+  connection.on("debug", (msg) => console.log(`[voice debug] ${msg}`));
+  connection.on("stateChange", (oldState, newState) => {
+    console.log(
+      `[voice state] ${oldState.status} → ${newState.status}` +
+        (newState.networking?.state ? ` (networking: ${JSON.stringify(newState.networking.state)})` : "")
+    );
   });
 
   try {
@@ -238,9 +253,7 @@ async function joinVoiceAndListen(message) {
     await message.reply(
       `⚠️ Impossible de rejoindre le vocal (timeout après ${VOICE_CONNECT_TIMEOUT_MS / 1000}s). ` +
         `État: ${connection.state.status}. ` +
-        "**Cause probable** : la plupart des hébergeurs conteneurisés/PaaS (confirmé sur Fly.io ET " +
-        "Render) routent mal le trafic UDP requis par les connexions vocales Discord — voir " +
-        "`docs/adr/0003-contrainte-hebergement-vocal-temps-reel.md`. " +
+        "Diagnostic en cours — voir `docs/adr/0003-contrainte-hebergement-vocal-temps-reel.md`. " +
         "Les messages vocaux natifs (`mimir message vocal ...`) restent utilisables, eux, car ils " +
         "n'utilisent que l'API REST."
     );

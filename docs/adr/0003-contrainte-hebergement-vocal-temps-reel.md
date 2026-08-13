@@ -57,27 +57,30 @@ plateformes. Un VPS classique (IP dédiée, pas de NAT partagé
 multi-tenant, contrôle total de la stack réseau) reste la seule option
 non testée à ce stade susceptible de lever la contrainte.
 
-**Expérience du 13 août 2026 : test UDP brut, indépendant de Discord —
-preuve décisive.** Pour écarter toute hypothèse liée spécifiquement au
-protocole ou à la librairie `@discordjs/voice`, un test isolé a été fait
-directement depuis la machine Fly.io de production (`flyctl ssh
-console`) : envoi d'une requête STUN standard (protocole UDP générique
-de découverte d'adresse réseau, utilisé par WebRTC entre autres — sans
-rapport avec Discord) vers `stun.l.google.com:19302`, un service public
-connu pour répondre de façon fiable. **Résultat : aucune réponse reçue
-après 5 secondes**, alors que l'envoi lui-même n'a levé aucune erreur
-(le paquet part, mais rien ne revient — ou le paquet ne part jamais
-réellement malgré l'absence d'erreur au niveau du socket). Ce test ne
-dépend d'aucune spécificité du protocole voix de Discord : il établit
-que **l'UDP sortant vers des hôtes arbitraires d'Internet ne fonctionne
-pas de façon fiable sur cette machine Fly.io** (`shared-cpu-1x`, IPv4
-partagée, pas d'adresse dédiée). C'est la preuve la plus directe
-obtenue à ce jour, et elle explique aussi *pourquoi* Render présente le
-même symptôme (§ expérience précédente) : les plateformes PaaS
-orientées HTTP/TCP, dont l'infrastructure est share-tenant et souvent
-peu ou pas testée pour du trafic UDP client soutenu vers des
-destinations arbitraires, ne sont probablement simplement pas conçues
-pour ce cas d'usage — indépendamment du fournisseur précis.
+**Expérience du 13 août 2026 : test UDP brut vers `stun.l.google.com`
+— CONCLUSION INITIALE INVALIDÉE PAR UN TEST DE CONTRÔLE.** Premier test
+isolé depuis la machine Fly.io de production (`flyctl ssh console`) :
+requête STUN vers `stun.l.google.com:19302` → aucune réponse après 5s,
+initialement interprété comme preuve d'un blocage UDP sortant général
+de la plateforme. **Ce test était trompeur.** Un test de contrôle
+immédiat avec deux autres services UDP indépendants a montré :
+- `stun.cloudflare.com:3478` → **réponse reçue** (32 octets, réponse
+  STUN valide)
+- `8.8.8.8:53` (DNS sur UDP) → **réponse reçue**
+- `stun1.l.google.com:19302` (alt Google) → toujours aucune réponse
+
+Les serveurs STUN publics de Google sont connus pour restreindre l'accès
+aux seules requêtes provenant d'applications WebRTC légitimes de Google
+(anti-abus) — le premier test produisait donc un **faux négatif** lié au
+serveur cible, pas à la plateforme Fly.io. **Conclusion corrigée : l'UDP
+sortant fonctionne normalement sur cette machine.** L'échec de connexion
+vocale n'est donc PAS un blocage UDP général — il faut chercher plus
+spécifiquement dans la négociation vocale de Discord elle-même (voir
+investigation suivante). L'échec identique observé sur Render reste réel
+mais sa cause doit être réinterprétée à la lumière de cette correction —
+possiblement une cause commune plus spécifique (ex: format ou timing de
+la négociation, plage d'IP Discord traitée différemment) plutôt qu'un
+blocage UDP générique des plateformes PaaS.
 
 ## Décision
 1. Ne pas prétendre résoudre ce problème uniquement par du code applicatif.
