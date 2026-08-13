@@ -171,10 +171,6 @@ async function handleUserSpeaking(connection, guildId, userId) {
     }
     if (!spokenPrompt) return; // "mimir" dit seul, sans question derrière
 
-    if (session.textChannel) {
-      await session.textChannel.send(`🎤 *"${transcript.trim()}"*`);
-    }
-
     let answer;
     try {
       answer = await askGroqForVoice(spokenPrompt);
