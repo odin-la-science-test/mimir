@@ -5,22 +5,19 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node index.js",
-    "pm2:start": "pm2 start ecosystem.config.js",
-    "pm2:stop": "pm2 stop mimir-bot",
-    "pm2:restart": "pm2 restart mimir-bot",
-    "pm2:logs": "pm2 logs mimir-bot",
-    "pm2:status": "pm2 status"
+    "start": "node index.js"
   },
   "dependencies": {
     "@discordjs/voice": "^0.18.0",
-    "all": "^0.0.0",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
     "ffmpeg-static": "^5.2.0",
     "form-data": "^4.0.0",
+    "mammoth": "^1.12.1",
     "msedge-tts": "^2.0.7",
     "opusscript": "^0.0.8",
+    "pdf-parse": "^1.1.4",
+    "pdfkit": "^0.15.2",
     "prism-media": "^1.3.5",
     "tweetnacl": "^1.0.3"
   },

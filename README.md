@@ -1,268 +1,417 @@
-# 🔮 Mimir — Bot Discord IA (Gemini, gratuit)
+# 🔮 Mimir — Bot Discord IA multi-provider
 
-Bot Discord qui répond via l'API Gemini de Google dès qu'un message
-commence par **"mimir"**.
+Bot Discord qui répond dès qu'un message commence par **"mimir"**, propulsé
+par une rotation automatique entre trois providers IA gratuits (Gemini,
+Groq, Mistral). Voix temps réel, messages vocaux natifs, lecture de
+documents, génération de PDF/images/graphiques, modération, traduction.
 
-Exemple :
 ```
 mimir explique-moi la différence entre une PCR et une qPCR
 ```
 
-## 1. Créer le bot Discord
+Chaque décision d'architecture non triviale est documentée et justifiée
+dans **[docs/adr/](docs/adr/)** (Architecture Decision Records) — ce
+README donne la vue d'ensemble, les ADR donnent le *pourquoi*.
 
-1. Va sur https://discord.com/developers/applications → **New Application**
-2. Onglet **Bot** → **Reset Token** → copie le token (tu le mets dans `.env`)
-3. Active **MESSAGE CONTENT INTENT** (obligatoire, en bas de l'onglet Bot)
-4. Onglet **OAuth2 > URL Generator** :
-   - Scopes : `bot`
-   - Permissions :
-     - **Texte** : `Send Messages`, `Read Message History`, `View Channels`, `Attach Files`, `Use External Emojis`
-     - **Modération** : `Ban Members`, `Kick Members`, `Moderate Members`
-     - **Vocal** : `Connect`, `Speak`, `Use Voice Activity`
-5. Ouvre l'URL générée pour inviter le bot sur ton serveur
+---
 
-## 2. Obtenir une clé Gemini gratuite
+## Sommaire
 
-1. Va sur https://aistudio.google.com/apikey
-2. Connecte-toi avec un compte Google → **Create API key**
-3. Aucune carte bancaire requise pour le tier gratuit
+1. [Architecture](#architecture)
+2. [Démarrage rapide](#démarrage-rapide)
+3. [Fonctionnalités](#fonctionnalités)
+4. [Routage des messages](#routage-des-messages)
+5. [Vocal — deux mécanismes distincts](#vocal--deux-mécanismes-distincts)
+6. [Documents : lecture et génération de PDF](#documents--lecture-et-génération-de-pdf)
+7. [Lecture intelligente des salons](#lecture-intelligente-des-salons)
+8. [Rotation multi-provider IA](#rotation-multi-provider-ia)
+9. [Modération](#modération)
+10. [Déploiement](#déploiement)
+11. [Sécurité](#sécurité)
+12. [Limites](#limites)
 
-## 3. Installer et lancer le bot
+---
 
-```bash
-cd mimir-bot
-npm install
-cp .env.example .env
+## Architecture
+
+```mermaid
+graph TD
+    subgraph Entrée
+        DC[Discord Gateway]
+    end
+
+    subgraph index.js["index.js (bootstrap)"]
+        HTTP[healthServer.js]
+        ROUTER[discord/router.js]
+        TRANS[discord/translation.js]
+    end
+
+    subgraph Domaines["src/ (un module par domaine)"]
+        VOICE["voice/\ntts · stt · session · nativeMessage"]
+        DOCS["documents/\nreader · pdfGenerator"]
+        CHAN["channels/\ncontextReader"]
+        MOD["moderation/\ncommands"]
+        MEDIA["media/\nimageGeneration · chartGeneration"]
+        AI["ai/\nproviders · conversation"]
+    end
+
+    subgraph Externe
+        GEMINI[(Gemini API)]
+        GROQ[(Groq API)]
+        MISTRAL[(Mistral API)]
+        EDGE[(Microsoft Edge TTS)]
+        POLLI[(Pollinations.ai)]
+        QC[(QuickChart.io)]
+    end
+
+    DC --> ROUTER
+    DC --> TRANS
+    ROUTER --> VOICE & DOCS & CHAN & MOD & MEDIA
+    VOICE --> AI
+    DOCS --> AI
+    CHAN --> AI
+    MEDIA --> AI
+    TRANS --> AI
+    AI --> GEMINI & GROQ & MISTRAL
+    VOICE --> EDGE
+    MEDIA --> POLLI
+    MEDIA --> QC
+    HTTP -. health-check .-> DC
 ```
 
-Ouvre `.env` et colle ton `DISCORD_TOKEN` et ton `GEMINI_API_KEY`.
+Voir [ADR 0001](docs/adr/0001-architecture-modulaire.md) pour la
+justification de ce découpage.
 
+```
+mimir-bot/
+├── index.js                    bootstrap : config, client Discord, healthcheck
+├── src/
+│   ├── config.js                 env vars + validation
+│   ├── triggers.js                mots déclencheurs + correspondance
+│   ├── ai/
+│   │   ├── providers.js            rotation Gemini/Groq/Mistral
+│   │   └── conversation.js         mémoire courte + appel IA principal
+│   ├── voice/
+│   │   ├── tts.js                  sélection du provider TTS (ElevenLabs > Google > Edge)
+│   │   ├── elevenLabsTts.js         synthèse vocale (ElevenLabs, prioritaire si configuré)
+│   │   ├── googleTts.js             synthèse vocale (Google Cloud, option alternative)
+│   │   ├── stt.js                  transcription (Groq Whisper)
+│   │   ├── session.js              vocal temps réel
+│   │   └── nativeMessage.js        messages vocaux Discord natifs
+│   ├── documents/
+│   │   ├── reader.js                lecture PDF/DOCX/texte
+│   │   └── pdfGenerator.js          génération de PDF
+│   ├── channels/contextReader.js   lecture de salons
+│   ├── moderation/commands.js      ban/kick/timeout
+│   ├── media/
+│   │   ├── imageGeneration.js       Pollinations.ai
+│   │   └── chartGeneration.js       CSV + QuickChart.io
+│   ├── discord/
+│   │   ├── router.js                dispatch des messages
+│   │   ├── translation.js           traduction par réaction emoji
+│   │   └── reply.js                 découpage réponses > 2000 caractères
+│   └── server/healthServer.js      health-check HTTP
+└── docs/adr/                    décisions d'architecture justifiées
+```
+
+---
+
+## Démarrage rapide
+
+### 1. Créer le bot Discord
+1. [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**
+2. Onglet **Bot** → **Reset Token** → copie le token
+3. Active **MESSAGE CONTENT INTENT** (en bas de l'onglet Bot, obligatoire)
+4. **OAuth2 > URL Generator** :
+   - Scope : `bot`
+   - Permissions texte : `Send Messages`, `Read Message History`, `View Channels`, `Attach Files`, `Use External Emojis`
+   - Permissions modération : `Ban Members`, `Kick Members`, `Moderate Members`
+   - Permissions vocales : `Connect`, `Speak`, `Use Voice Activity`
+5. Ouvre l'URL générée pour inviter le bot
+
+### 2. Récupérer des clés API gratuites
+| Provider | Usage | Lien |
+|---|---|---|
+| Gemini | IA principale (texte) | https://aistudio.google.com/apikey |
+| Groq | Transcription vocale + fallback IA | https://console.groq.com |
+| Mistral | Fallback IA supplémentaire | https://console.mistral.ai |
+
+Un seul provider suffit pour démarrer ; en configurer plusieurs augmente
+le quota total disponible (voir [rotation multi-provider](#rotation-multi-provider-ia)).
+
+### 3. Installer et lancer
 ```bash
+git clone <repo>
+cd mimir-bot
+npm install
+cp env.example .env
+# édite .env : colle au moins DISCORD_TOKEN + GEMINI_API_KEY
 npm start
 ```
 
-Si tout est bon, tu verras dans le terminal :
+Sortie attendue :
 ```
 ✅ Mimir est en ligne : Mimir#1234
 🔮 Déclencheur : messages commençant par "mimir"
+🌐 Serveur de health-check à l'écoute sur 0.0.0.0:8080
 ```
 
-## Lire tout le serveur (nouveau)
+---
 
-En plus de mentionner un salon précis avec `#nom-du-salon`, tu peux demander
-un aperçu de **tout le serveur** en incluant une des phrases suivantes dans
-ta demande :
-- "tout le serveur"
-- "tous les salons"
-- "tous les canaux"
+## Fonctionnalités
 
-Exemple :
+| Domaine | Déclencheur (exemples) | Handler |
+|---|---|---|
+| Conversation | `mimir <question>` | `ai/conversation.js` |
+| Vocal temps réel | `mimir rejoins le vocal`, `mimir viens` | `voice/session.js` |
+| Message vocal natif | `mimir message vocal <question>` | `voice/nativeMessage.js` |
+| **Lecture de document** | pièce jointe PDF/DOCX/texte + `mimir <question>` | `documents/reader.js` |
+| **Génération de PDF** | `mimir génère un pdf sur <sujet>` | `documents/pdfGenerator.js` |
+| Lecture de salon | `mimir résume #salon`, `mimir résume ce salon`, `mimir tout le serveur` | `channels/contextReader.js` |
+| Génération d'image | `mimir dessine <description>` | `media/imageGeneration.js` |
+| CSV + graphique | `mimir graphique <données>` | `media/chartGeneration.js` |
+| Modération | `mimir ban @user <raison>`, `timeout`, `kick`... | `moderation/commands.js` |
+| Traduction | réagir avec un emoji drapeau 🇫🇷🇬🇧🇪🇸... | `discord/translation.js` |
+
+Les entrées en **gras** sont les fonctionnalités ajoutées lors de la
+dernière refonte (documents + PDF).
+
+---
+
+## Routage des messages
+
+Chaque message reçu est testé contre des listes de mots-clés, dans un
+ordre précis (les commandes `un-*` avant leur contrepartie positive, car
+elles la contiennent comme sous-chaîne — `"unban"` contient `"ban"`) :
+
+```mermaid
+flowchart TD
+    A[Message reçu] --> B{Pièce jointe\nvocale native ?}
+    B -->|oui| VM[handleVoiceMessage]
+    B -->|non| C{Commence par\n'mimir' ?}
+    C -->|non| IGNORE[ignoré]
+    C -->|oui| D{Rejoindre/quitter\nle vocal ?}
+    D -->|oui| SESS[voice/session.js]
+    D -->|non| E{Message vocal\nnatif demandé ?}
+    E -->|oui| NAT[voice/nativeMessage.js]
+    E -->|non| F{PDF demandé ?}
+    F -->|oui| PDF[documents/pdfGenerator.js]
+    F -->|non| G{Modération ?\nun* avant les positifs}
+    G -->|oui| MOD[moderation/commands.js]
+    G -->|non| H{Image / CSV ?}
+    H -->|oui| MEDIA[media/*.js]
+    H -->|non| I{Document\njoint supporté ?}
+    I -->|oui| DOC[documents/reader.js]
+    I -->|non| J{Lecture de salon\nexplicite ?}
+    J -->|oui| CHAN[channels/contextReader.js]
+    J -->|non| K[Question générale\n+ contexte de salon éventuel]
+    K --> AI[ai/conversation.js]
 ```
-mimir fais-moi un résumé de ce qui s'est passé sur tout le serveur aujourd'hui
+
+Les déclencheurs courts et génériques (`"come"`, `"viens"`) utilisent une
+correspondance par **frontière de mot**, pas une simple sous-chaîne —
+voir [ADR 0010](docs/adr/0010-correspondance-des-declencheurs.md) pour
+l'exemple concret de faux positif que ça évite (`"awesome"` contient
+`"come"`).
+
+---
+
+## Vocal — deux mécanismes distincts
+
+Il y a deux façons complètement différentes pour Mimir de « parler », à
+ne pas confondre :
+
+| | Voix temps réel | Message vocal natif |
+|---|---|---|
+| Déclencheur | `mimir rejoins le vocal` | `mimir message vocal <question>` |
+| Transport | WebSocket + **UDP** (gateway vocal Discord) | **HTTP REST** pur |
+| Fonctionne sur Fly.io ? | ⚠️ Dépend du routage UDP de l'hébergeur | ✅ Toujours |
+| Documentation | [ADR 0003](docs/adr/0003-contrainte-hebergement-vocal-temps-reel.md) | [ADR 0004](docs/adr/0004-protocole-messages-vocaux-natifs.md) |
+
+### Voix temps réel
+```mermaid
+sequenceDiagram
+    participant U as Utilisateur (vocal)
+    participant B as Mimir
+    participant W as Groq Whisper
+    participant AI as Groq LLM
+    participant T as Edge TTS
+
+    U->>B: "mimir explique la photosynthèse"
+    B->>W: audio PCM → transcription
+    W-->>B: texte transcrit
+    B->>AI: prompt (réponse courte, orale)
+    AI-->>B: réponse texte
+    B->>T: synthèse vocale
+    T-->>B: audio MP3
+    B->>U: lecture dans le salon vocal
+```
+`GROQ_MODEL_VOICE` (`openai/gpt-oss-120b`) est volontairement différent du
+modèle texte (`llama-3.3-70b-versatile`) : la latence perçue compte plus
+à l'oral qu'à l'écrit.
+
+> ⚠️ **La synthèse vocale (TTS), utilisée par les deux mécanismes
+> ci-dessous, peut échouer selon l'hébergeur.** Microsoft Edge TTS
+> (gratuit, par défaut) n'est pas une API officielle : Microsoft bloque
+> parfois les connexions depuis les IP mutualisées de certains hébergeurs
+> cloud — confirmé sur Fly.io (erreur `Stream closed before the
+> synthesis completed`). Si ça arrive, configure `ELEVENLABS_API_KEY`
+> (recommandé, ~10k caractères gratuits/mois, voir `env.example`) ou
+> `GOOGLE_TTS_API_KEY` (carte bancaire requise, mais tier gratuit plus
+> large) : le vocal bascule automatiquement dessus, sans changement de
+> code. Piper (auto-hébergé) a été envisagé mais écarté — voir
+> [ADR 0012](docs/adr/0012-choix-final-tts-elevenlabs.md) pour le
+> comparatif complet et [ADR 0011](docs/adr/0011-tts-google-cloud-si-edge-bloque.md)
+> pour le diagnostic initial.
+
+### Message vocal natif (bulle audio Discord)
+```mermaid
+sequenceDiagram
+    participant B as Mimir
+    participant D as Discord REST API
+    B->>D: POST /attachments (demande upload_url)
+    D-->>B: upload_url + upload_filename
+    B->>D: PUT upload_url (fichier .ogg, sans auth header)
+    B->>D: POST /messages (flags 8192 + waveform)
+    D-->>B: message vocal publié
 ```
 
-Le bot lit alors un échantillon récent (15 messages) de chaque salon texte
-auquel il a accès (max 15 salons, pour ne pas saturer le prompt envoyé à
-Gemini ni prendre trop de temps).
+---
 
-## Génération d'images (amélioré)
+## Documents : lecture et génération de PDF
 
-Utilise un mot comme "dessine", "génère une image de", "image :" dans ta
-demande :
+### Lire un document joint
+Joins un PDF, DOCX ou fichier texte (`.pdf`, `.docx`, `.txt`, `.md`,
+`.csv`, `.json`, `.log`) à un message commençant par `mimir` :
 ```
-mimir dessine un dragon dans un style dark fantasy
-mimir image : un labo de biologie futuriste
-mimir dessine un paysage de montagne en 16:9
+mimir résume ce rapport          [pièce jointe : rapport.pdf]
+mimir qu'est-ce que ce contrat dit sur la résiliation ?   [contrat.docx]
 ```
-Généré via **Pollinations.ai** (gratuit, sans clé API), avec quelques
-améliorations :
-- **Prompt enrichi automatiquement** : ta description brute est d'abord
-  réécrite par Gemini en un prompt détaillé (style, éclairage, ambiance)
-  pour un bien meilleur rendu — inutile de tout détailler toi-même.
-- **Format détecté automatiquement** : ajoute "portrait", "paysage",
-  "16:9" ou "9:16" dans ta demande pour changer les proportions (carré
-  par défaut).
-- **Seed aléatoire** à chaque génération, pour ne pas retomber sur une
-  image mise en cache par Pollinations pour un prompt similaire.
-- **Nouvelle tentative automatique** en cas d'échec temporaire du service.
+Le texte est extrait (`pdf-parse` / `mammoth`), limité à 20 000
+caractères, puis utilisé comme contexte pour répondre. Fichiers > 15 Mo
+refusés avant téléchargement (protection mémoire, voir
+[ADR 0007](docs/adr/0007-lecture-de-documents.md)).
 
-## CSV + graphiques (nouveau)
-
-Utilise "csv", "graphique", "diagramme" ou "tableau de données" dans ta
-demande :
+### Générer un PDF
 ```
-mimir csv des ventes : janvier 100, février 150, mars 200, avec un graphique en barres
-mimir graphique en camembert de la répartition budget marketing 40%, dev 35%, ops 25%
+mimir génère un pdf sur l'histoire de la photographie
+mimir crée un pdf résumant notre discussion
 ```
-Le bot demande à Gemini de structurer les données, génère un fichier `.csv`
-téléchargeable et un graphique (image) via **QuickChart.io** (gratuit,
-sans clé). Fonctionne mieux si tu donnes des valeurs précises dans ta
-demande — sinon Gemini invente des données plausibles.
+L'IA structure le contenu (titre + sections), `pdfkit` le met en page,
+le fichier est envoyé en pièce jointe. Voir
+[ADR 0008](docs/adr/0008-generation-de-pdf.md).
 
-## Réponses vocales (nouveau)
+---
 
-Une fois que Mimir a rejoint un salon vocal (`mimir rejoins le vocal`),
-**toutes** ses réponses — pas seulement celles données à l'oral au micro —
-sont aussi lues à voix haute automatiquement. Si tu tapes une question
-classique dans le texte pendant que Mimir est en vocal, il répond dans
-le salon texte **et** la lit à voix haute (le markdown — gras, liens,
-blocs de code — est nettoyé avant la lecture pour ne pas lire les
-symboles). Si la synthèse échoue, la réponse texte reste affichée
-normalement et une erreur est signalée dans le salon.
+## Lecture intelligente des salons
 
-## Modération : ban, kick, timeout (nouveau)
+Trois façons de donner du contexte à Mimir :
 
-Mimir peut agir comme modérateur si **toi** tu as la permission Discord
-correspondante (le bot vérifie ton rôle, pas juste le sien). Il te faut
-juste mentionner la personne (`@pseudo`, en vrai mention cliquable).
+```
+mimir résume #annonces                  → salon mentionné (vraie mention OU nom tapé en clair)
+mimir résume ce salon                   → salon courant
+mimir résume tout le serveur            → échantillon de tous les salons accessibles
+mimir quels salons existent             → liste les salons texte visibles
+```
+
+Le filet de secours par nom (`#salon` tapé sans passer par
+l'auto-complétion Discord) est documenté dans
+[ADR 0009](docs/adr/0009-lecture-intelligente-des-salons.md) — avant
+cette correction, taper `#salon` sans le sélectionner dans la liste
+Discord échouait silencieusement.
+
+---
+
+## Rotation multi-provider IA
+
+```mermaid
+flowchart LR
+    G1[Gemini clé 1] -->|429| G2[Gemini clé 2]
+    G2 -->|429| G3[Gemini clé 3]
+    G3 -->|429| GR[Groq]
+    GR -->|429| M1[Mistral clé 1]
+    M1 -->|429| M2[Mistral clé 2]
+    M2 -->|429| G1
+```
+
+La rotation ne se déclenche **que** sur une erreur de quota (429), jamais
+sur une erreur générique — voir
+[ADR 0006](docs/adr/0006-rotation-multi-provider.md). Configure autant de
+clés que tu veux par provider dans `.env`, séparées par des virgules :
+```env
+GEMINI_API_KEY=cle1,cle2,cle3
+MISTRAL_API_KEY=cle1,cle2
+```
+
+---
+
+## Modération
+
+Le bot vérifie la permission Discord de **l'auteur du message**, pas
+seulement la sienne :
 
 ```
 mimir ban @pseudo comportement toxique
 mimir unban 123456789012345678
 mimir kick @pseudo spam
 mimir timeout @pseudo 10m propos déplacés
-mimir mute @pseudo 1h
 mimir untimeout @pseudo
-mimir unmute @pseudo
 ```
 
-- **ban** / **unban** : bannissement permanent. `unban` prend l'**ID**
-  Discord de la personne (elle n'est plus sur le serveur donc impossible
-  de la mentionner) — clic droit sur un profil > "Copier l'ID utilisateur"
-  (active le mode développeur dans Discord si l'option n'apparaît pas :
-  Paramètres > Avancés > Mode développeur).
-- **kick** : expulsion, la personne peut revenir avec une nouvelle invitation.
-- **timeout** / **mute** : rend la personne muette (texte + vocal) pendant
-  une durée donnée. Formats acceptés : `s` (secondes), `m` (minutes),
-  `h` (heures), `j` ou `d` (jours). Max 28 jours (limite Discord).
-- **untimeout** / **unmute** : retire un timeout en cours.
+Permissions requises côté Discord : `Ban Members`, `Kick Members`,
+`Moderate Members`. Le rôle de Mimir doit être positionné au-dessus des
+membres qu'il doit pouvoir modérer.
 
-⚠️ Permissions requises côté Discord (à activer lors de l'invitation du
-bot, section OAuth2 du README) : **Ban Members**, **Kick Members**,
-**Moderate Members** (aussi appelée "Timeout Members"). Le bot ne peut
-pas agir sur un membre dont le rôle est égal ou supérieur au sien —
-place le rôle de Mimir assez haut dans la hiérarchie des rôles du serveur.
+---
 
-## Traducteur (nouveau)
+## Déploiement
 
-Réagis à **n'importe quel message** avec un emoji drapeau
-(🇫🇷 🇬🇧 🇺🇸 🇪🇸 🇩🇪 🇮🇹 🇵🇹 🇯🇵 🇰🇷 🇨🇳 🇷🇺 🇳🇱 🇸🇦 🇮🇳 🇹🇷 🇵🇱)
-et Mimir répond avec la traduction dans la langue correspondante.
+Le déploiement actif de ce projet est **Fly.io** (`fly.toml` +
+`.github/workflows/fly-deploy.yml`) ; `render.yaml` est présent comme
+configuration alternative testée.
 
-## Lire un autre salon (nouveau)
-
-Si tu mentionnes un salon avec la vraie mention Discord (tape `#` puis
-choisis le salon dans la liste qui apparaît, il devient bleu/cliquable),
-Mimir va lire les 50 derniers messages de ce salon et s'en servir comme
-contexte pour répondre.
-
-Exemple :
-```
-mimir fais-moi un résumé du dernier rapport dans #ols-forum-suivi-travail-dev
-```
-
-⚠️ Important :
-- Ça ne marche qu'avec une **vraie mention** (le salon doit apparaître en bleu
-  dans le message envoyé), pas juste le nom tapé en texte.
-- Le bot doit avoir la permission **Voir le salon** + **Lire l'historique des
-  messages** sur ce salon précis (vérifie ses permissions côté Discord si
-  ça ne fonctionne pas).
-- Si le bot n'a pas accès, il répond sans le contexte du salon (log
-  d'avertissement dans le terminal).
-
-## Fonctionnement
-
-- Le bot ignore tous les messages sauf ceux qui **commencent** par `mimir`
-  (insensible à la casse : "Mimir", "MIMIR", "mimir" fonctionnent tous).
-- Le mot déclencheur est retiré avant d'envoyer le texte à Gemini.
-- Une petite mémoire de conversation (10 derniers échanges) est gardée
-  par salon, pour que le bot se souvienne du contexte récent.
-- Les réponses trop longues (>2000 caractères) sont automatiquement
-  découpées en plusieurs messages.
-
-## Limites du tier gratuit Gemini
-
-Le modèle par défaut (`gemini-2.5-flash`) offre un quota gratuit quotidien
-généreux, sans carte bancaire. Si tu dépasses la limite (erreur 429),
-attends la réinitialisation quotidienne ou passe temporairement sur un
-autre modèle en changeant `GEMINI_MODEL` dans `.env`.
-
-## Héberger le bot en continu (24/7)
-
-En local, le bot s'arrête si tu fermes ton PC. Pour le faire tourner
-en permanence, options gratuites/pas chères :
-- **Railway** ou **Render** (tier gratuit limité, faciles à configurer)
-- Un petit VPS (quelques euros/mois) + `pm2` pour garder le process actif
-- Une Raspberry Pi ou un vieux PC à la maison
-
-## Module vocal complet
-
-Le bot peut rejoindre un salon vocal, écouter les conversations, les transcrire et y répondre à voix haute ! 
-
-### Configuration requise
-
-Pour utiliser le module vocal, ajoute une clé API Groq (gratuite) dans ton `.env` :
+⚠️ Les deux plateformes exigent un serveur HTTP répondant sur un port —
+`src/server/healthServer.js` le fournit. Sans lui, la plateforme
+considère le process en échec et le redémarre, ce qui tue toute session
+vocale active. Voir [ADR 0002](docs/adr/0002-serveur-http-de-health-check.md).
 
 ```bash
-GROQ_API_KEY=ta_cle_groq_ici
+flyctl deploy
 ```
 
-**Obtenir une clé Groq gratuite :**
-1. Va sur https://console.groq.com
-2. Crée un compte (gratuit, sans carte bancaire)
-3. Génère une clé API
+La voix temps réel peut être instable selon le routage UDP de
+l'hébergeur (voir [ADR 0003](docs/adr/0003-contrainte-hebergement-vocal-temps-reel.md)) ;
+les messages vocaux natifs et toutes les autres fonctionnalités
+(HTTP REST) ne sont pas concernés par cette contrainte.
 
-### Commandes vocales
+---
 
-```
-mimir rejoins le vocal        # Le bot rejoint ton salon vocal
-mimir quitte le vocal         # Le bot quitte le salon vocal
-stop mimir                    # À dire à l'oral pour faire partir le bot
-```
+## Sécurité
 
-### Fonctionnalités vocales
+- `.env` est ignoré par git (`.gitignore`) — **ne jamais** committer de
+  clé API ni la coller dans un fichier markdown suivi ou non par git.
+- Si une clé a un jour été collée dans un fichier resté sur disque
+  (même non commité), régénère-la par précaution depuis la console du
+  provider concerné.
+- Le endpoint de health-check n'expose que l'état de disponibilité, rien
+  de sensible.
 
-**1. Écoute et transcription**
-- Le bot écoute tout ce qui se dit dans le salon vocal
-- Transcription automatique via Groq Whisper (gratuit, très précis)
-- Affiche les transcriptions dans le salon texte
+---
 
-**2. Commandes vocales**
-- Dis "mimir" suivi de ta question à l'oral (comme dans le chat)
-- Exemple : *"mimir explique-moi la photosynthèse"*
-- Le bot transcrit, génère une réponse courte adaptée à l'oral, et la lit à voix haute
+## Limites
 
-**3. Synthèse vocale (TTS)**
-- Utilise Microsoft Edge TTS (gratuit, sans clé API)
-- Voix française par défaut : `fr-FR-HenriNeural`
-- Personnalisable dans `.env` avec `TTS_VOICE` (autres voix : `fr-FR-DeniseNeural`, `fr-CA-JeanNeural`, etc.)
-
-**4. Messages vocaux Discord natifs**
-- Envoie un message vocal Discord → Mimir répond aussi en message vocal
-- Utilise la commande : `mimir message vocal ta question ici`
-- Le bot génère une vraie note vocale Discord (avec forme d'onde et durée)
-
-**5. Lecture automatique des réponses texte**
-- Une fois en vocal, **toutes** les réponses texte sont aussi lues à voix haute
-- Même si tu poses une question dans le chat, le bot la lit en vocal
-- Le markdown est nettoyé automatiquement avant lecture
-
-### Transparence et éthique
-
-⚠️ **Important** : Le bot annonce clairement dans le salon texte qu'il enregistre et transcrit la conversation dès qu'il rejoint le vocal. Tous les participants sont informés.
-
-### Dépendances audio
-
-Les dépendances nécessaires sont déjà installées :
-- `@discordjs/voice` : connexion vocale Discord
-- `ffmpeg-static` : traitement audio
-- `opusscript` : décodage Opus
-- `prism-media` : pipeline audio
-- `msedge-tts` : synthèse vocale Microsoft Edge
+- Le bot ne rejoint qu'un salon vocal à la fois par serveur.
+- La mémoire de conversation (10 derniers échanges par salon) est en RAM
+  uniquement — perdue à chaque redémarrage.
+- Pas d'OCR : un PDF scanné (image sans couche de texte) ne peut pas être
+  lu.
+- Génération de PDF limitée à du texte structuré (pas de tableaux/images
+  dans le document généré).
 
 ## Personnalisation
 
-- Change `TRIGGER_WORD` dans `index.js` pour un autre mot déclencheur.
-- Modifie le `systemInstruction` dans `askGemini()` pour changer la
-  personnalité/le ton de Mimir (ex : thème dark fantasy, etc.).
-#
+- `TRIGGER_WORD` dans `src/config.js` pour changer le mot déclencheur.
+- `systemInstruction` dans `src/ai/conversation.js` pour changer la
+  personnalité de Mimir.
+- `TTS_VOICE` dans `.env` pour changer la voix (liste complète des voix
+  Edge TTS : https://github.com/Migushthe2nd/MsEdgeTTS).

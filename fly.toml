@@ -4,12 +4,12 @@
 #
 
 app = 'mimir-bot'
-primary_region = 'cdg'
+primary_region = 'fra'
 
 [build]
 
 [env]
-  GEMINI_MODEL = 'gemini-2.5-flash'
+  GEMINI_MODEL = 'gemini-3.5-flash'
   NODE_ENV = 'production'
   TTS_VOICE = 'fr-FR-HenriNeural'
 

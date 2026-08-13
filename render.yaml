@@ -1,8 +1,10 @@
 services:
   - type: web
     name: mimir-bot
-    env: node
-    buildCommand: npm install
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm ci --only=production
     startCommand: node index.js
     envVars:
       - key: NODE_ENV
@@ -12,8 +14,10 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.5-flash
       - key: GROQ_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
         sync: false
       - key: TTS_VOICE
         value: fr-FR-HenriNeural
