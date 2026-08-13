@@ -37,6 +37,26 @@ structurelle de la plateforme (probablement liée à la virtualisation
 Firecracker utilisée par Fly.io pour ses sockets UDP), pas d'une
 particularité corrigible par le choix de région.
 
+**Expérience du 13 août 2026 : test sur Render, échec identique.**
+Deuxième hypothèse testée : le problème serait spécifique à
+l'architecture Fly.io (microVM Firecracker) et un hébergeur PaaS plus
+conventionnel (conteneurs Docker sur infrastructure cloud standard,
+pas de virtualisation maison) s'en sortirait mieux. Déployé le code
+identique sur Render (plan gratuit, région Frankfurt, via
+`render.yaml`), machine Fly.io arrêtée pendant le test pour éviter les
+doublons de réponse. **Résultat : même timeout, même comportement.**
+Ceci élimine à son tour l'hypothèse "c'est une particularité de
+Firecracker/Fly.io" : le problème se reproduit sur deux plateformes
+d'architecture différente (microVM chez Fly.io, conteneurs chez
+Render), ce qui pointe vers quelque chose de plus général — soit une
+caractéristique commune aux hébergeurs PaaS orientés HTTP (filtrage ou
+absence d'optimisation pour du trafic UDP client soutenu, indépendant
+de la techno de virtualisation exacte), soit une contrainte liée au
+NAT/pare-feu de sortie partagé entre plusieurs locataires sur ces deux
+plateformes. Un VPS classique (IP dédiée, pas de NAT partagé
+multi-tenant, contrôle total de la stack réseau) reste la seule option
+non testée à ce stade susceptible de lever la contrainte.
+
 ## Décision
 1. Ne pas prétendre résoudre ce problème uniquement par du code applicatif.
 2. Porter le délai d'attente de connexion à 60 secondes

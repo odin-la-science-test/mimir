@@ -238,8 +238,9 @@ async function joinVoiceAndListen(message) {
     await message.reply(
       `⚠️ Impossible de rejoindre le vocal (timeout après ${VOICE_CONNECT_TIMEOUT_MS / 1000}s). ` +
         `État: ${connection.state.status}. ` +
-        "**Cause probable** : certains hébergeurs (dont Fly.io) routent mal le trafic UDP requis par " +
-        "les connexions vocales Discord — voir `docs/adr/0003-contrainte-hebergement-vocal-temps-reel.md`. " +
+        "**Cause probable** : la plupart des hébergeurs conteneurisés/PaaS (confirmé sur Fly.io ET " +
+        "Render) routent mal le trafic UDP requis par les connexions vocales Discord — voir " +
+        "`docs/adr/0003-contrainte-hebergement-vocal-temps-reel.md`. " +
         "Les messages vocaux natifs (`mimir message vocal ...`) restent utilisables, eux, car ils " +
         "n'utilisent que l'API REST."
     );
