@@ -23,9 +23,3 @@ services:
         value: fr-FR-HenriNeural
       - key: ELEVENLABS_API_KEY
         sync: false
-      - key: ELEVENLABS_VOICE_ID
-        sync: false
-      - key: GOOGLE_TTS_API_KEY
-        sync: false
-      - key: GOOGLE_TTS_VOICE
-        sync: false
