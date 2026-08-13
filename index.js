@@ -18,6 +18,7 @@ config.assertRequiredConfig();
 const { startHealthServer } = require("./src/server/healthServer");
 const { registerMessageRouter } = require("./src/discord/router");
 const { registerTranslationHandler } = require("./src/discord/translation");
+const { startAgentBridge } = require("./src/agent/bridge");
 
 console.log("\n🤖 Configuration des providers IA :");
 if (config.hasGemini) console.log(`   ✅ Gemini: ${config.GEMINI_API_KEYS.length} clé(s) configurée(s)`);
@@ -69,6 +70,12 @@ client.once("clientReady", () => {
 
 registerMessageRouter(client);
 registerTranslationHandler(client);
-startHealthServer(client);
+const healthServer = startHealthServer(client);
+
+if (config.hasRemoteCoding) {
+  startAgentBridge(healthServer);
+} else {
+  console.log("🌉 Codage à distance désactivé (OWNER_DISCORD_ID / LOCAL_AGENT_TOKEN non configurés).");
+}
 
 client.login(config.DISCORD_TOKEN);

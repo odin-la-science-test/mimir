@@ -44,6 +44,7 @@ const { handleImageRequest } = require("../media/imageGeneration");
 const { handleCsvChartRequest } = require("../media/chartGeneration");
 const { askGemini } = require("../ai/conversation");
 const { sendLongReply } = require("./reply");
+const { isCodeCommand, handleRemoteCodingRequest } = require("../agent/remoteCoding");
 
 function registerMessageRouter(client) {
   client.on("messageCreate", async (message) => {
@@ -71,6 +72,10 @@ function registerMessageRouter(client) {
     try {
       const lowerPrompt = prompt.toLowerCase();
 
+      if (isCodeCommand(lowerPrompt)) {
+        await handleRemoteCodingRequest(message, prompt);
+        return;
+      }
       if (isJoinVoiceTrigger(lowerPrompt)) {
         await joinVoiceAndListen(message);
         return;

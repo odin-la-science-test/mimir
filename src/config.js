@@ -89,6 +89,16 @@ const MIN_AUDIO_BYTES = VOICE_SAMPLE_RATE * VOICE_CHANNELS * 2 * 0.3; // ignore 
 const DOCUMENT_MAX_DOWNLOAD_BYTES = 15 * 1024 * 1024; // 15 Mo avant extraction
 const DOCUMENT_MAX_EXTRACTED_CHARS = 20000; // texte injecté dans le prompt IA
 
+// Agent de codage local (Claude Code piloté à distance depuis Discord) —
+// voir docs/adr/0015-pont-agent-codage-local.md. Ces deux valeurs sont
+// des contrôles de sécurité, pas de simples préférences : OWNER_DISCORD_ID
+// restreint qui peut déclencher une écriture de code sur la machine de
+// l'opérateur, LOCAL_AGENT_TOKEN authentifie le pont WebSocket pour
+// qu'un tiers ne puisse pas s'y faire passer pour l'agent local.
+const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID || null;
+const LOCAL_AGENT_TOKEN = process.env.LOCAL_AGENT_TOKEN || null;
+const hasRemoteCoding = !!(OWNER_DISCORD_ID && LOCAL_AGENT_TOKEN);
+
 const hasGemini = GEMINI_API_KEYS.length > 0;
 const hasGroq = !!GROQ_API_KEY;
 const hasMistral = MISTRAL_API_KEYS.length > 0;
@@ -137,6 +147,9 @@ module.exports = {
   MIN_AUDIO_BYTES,
   DOCUMENT_MAX_DOWNLOAD_BYTES,
   DOCUMENT_MAX_EXTRACTED_CHARS,
+  OWNER_DISCORD_ID,
+  LOCAL_AGENT_TOKEN,
+  hasRemoteCoding,
   hasGemini,
   hasGroq,
   hasMistral,

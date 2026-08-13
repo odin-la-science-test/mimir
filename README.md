@@ -26,9 +26,10 @@ README donne la vue d'ensemble, les ADR donnent le *pourquoi*.
 7. [Lecture intelligente des salons](#lecture-intelligente-des-salons)
 8. [Rotation multi-provider IA](#rotation-multi-provider-ia)
 9. [Modération](#modération)
-10. [Déploiement](#déploiement)
-11. [Sécurité](#sécurité)
-12. [Limites](#limites)
+10. [Codage à distance (agent local)](#codage-à-distance-agent-local)
+11. [Déploiement](#déploiement)
+12. [Sécurité](#sécurité)
+13. [Limites](#limites)
 
 ---
 
@@ -110,7 +111,11 @@ mimir-bot/
 │   │   ├── router.js                dispatch des messages
 │   │   ├── translation.js           traduction par réaction emoji
 │   │   └── reply.js                 découpage réponses > 2000 caractères
-│   └── server/healthServer.js      health-check HTTP
+│   ├── server/healthServer.js      health-check HTTP
+│   └── agent/
+│       ├── bridge.js                pont WebSocket vers l'agent local
+│       └── remoteCoding.js          commande "mimir code" (owner-only)
+├── local-agent/                 agent local (tourne chez l'opérateur, pas Fly.io)
 └── docs/adr/                    décisions d'architecture justifiées
 ```
 
@@ -361,6 +366,50 @@ mimir untimeout @pseudo
 Permissions requises côté Discord : `Ban Members`, `Kick Members`,
 `Moderate Members`. Le rôle de Mimir doit être positionné au-dessus des
 membres qu'il doit pouvoir modérer.
+
+---
+
+## Codage à distance (agent local)
+
+Déclenche une vraie tâche de codage (lecture/écriture de fichiers) sur
+ta machine locale, exécutée par **Claude Code**, depuis Discord :
+
+```
+mimir code "C:\projets\mon-app" ajoute un bouton de connexion sur la page d'accueil
+```
+
+```mermaid
+sequenceDiagram
+    participant D as Discord (toi uniquement)
+    participant B as Mimir (Fly.io)
+    participant A as Agent local (ta machine)
+    participant C as Claude Code
+
+    D->>B: mimir code "chemin" tâche
+    B->>B: vérifie author.id == OWNER_DISCORD_ID
+    B->>A: tâche (via WebSocket, connexion sortante de A vers B)
+    A->>C: claude -p "tâche" --permission-mode acceptEdits
+    C-->>A: résultat (fichiers modifiés)
+    A-->>B: résumé
+    B-->>D: ✅ terminé
+```
+
+🔒 **Restreint à `OWNER_DISCORD_ID` uniquement** — personne d'autre sur
+le serveur ne peut déclencher ça, même les administrateurs Discord. Le
+bot cloud ne peut pas atteindre ta machine directement : un petit agent
+(`local-agent/agent.js`) doit tourner chez toi et se connecte *vers* le
+bot (aucun port à ouvrir). Voir
+[local-agent/README.md](local-agent/README.md) pour l'installation et
+[ADR 0015](docs/adr/0015-pont-agent-codage-local.md) pour la
+justification complète de l'architecture et ses limites.
+
+Configuration requise (`.env`) :
+```env
+OWNER_DISCORD_ID=ton_id_discord_a_toi
+LOCAL_AGENT_TOKEN=un_secret_genere_une_fois
+```
+Sans ces deux variables, la fonctionnalité reste entièrement désactivée
+(le pont WebSocket n'est même pas démarré).
 
 ---
 
