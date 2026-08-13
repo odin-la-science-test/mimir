@@ -182,10 +182,6 @@ async function handleUserSpeaking(connection, guildId, userId) {
       return;
     }
 
-    if (session.textChannel) {
-      await session.textChannel.send(`🔊 ${answer}`);
-    }
-
     try {
       await speakInVoiceChannel(connection, answer);
     } catch (err) {
