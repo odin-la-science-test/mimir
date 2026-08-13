@@ -236,8 +236,18 @@ async function joinVoiceAndListen(message) {
   // quelque chose de plus précis dans la négociation vocale Discord. Ces
   // logs servent à localiser exactement où ça coince (utile pour
   // interpréter `flyctl logs` après un nouvel essai).
+  let trackedNetworking = null;
   connection.on("debug", (msg) => console.log(`[voice debug] ${msg}`));
   connection.on("stateChange", (oldState, newState) => {
+    // Le code de fermeture WebSocket exact (4006, 4014, 4022...) que Discord
+    // envoie n'est pas inclus dans le canal "debug" standard — on l'intercepte
+    // directement sur l'objet networking interne, seul endroit où il transite.
+    if (newState.networking && newState.networking !== trackedNetworking) {
+      trackedNetworking = newState.networking;
+      trackedNetworking.once("close", (code) =>
+        console.log(`[voice networking close] code Discord = ${code}`)
+      );
+    }
     console.log(
       `[voice state] ${oldState.status} → ${newState.status}` +
         (newState.networking?.state ? ` (networking: ${JSON.stringify(newState.networking.state)})` : "")
